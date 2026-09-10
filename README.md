@@ -36,6 +36,10 @@ make dev
 
 This serves the API at <http://127.0.0.1:8000>, with interactive docs at <http://127.0.0.1:8000/docs>.
 
+The API reads the Parquet dataset described in [Data preparation](#data-preparation);
+build that first, or `/data` will just return nothing. By default it looks in
+`data-prep/naomi-data/` - point it elsewhere with `HIVTOOLS_MCP_NAOMI_DATA_DIR`.
+
 To run it as it runs in production:
 
 ```bash
@@ -46,10 +50,12 @@ uv run fastapi run app/main.py
 
 ```bash
 docker build -t hivtools-mcp .
-docker run -p 80:80 hivtools-mcp
+docker run -p 80:80 -v "$PWD/data-prep/naomi-data:/data:ro" -e HIVTOOLS_MCP_NAOMI_DATA_DIR=/data hivtools-mcp
 ```
 
-The API is then served at <http://127.0.0.1:80>.
+The API is then served at <http://127.0.0.1:80>. The image does not bundle the
+Parquet dataset - mount it and point `HIVTOOLS_MCP_NAOMI_DATA_DIR` at it as above;
+without it the API starts fine but `/data` returns nothing.
 
 ## Data preparation
 
@@ -77,6 +83,59 @@ Query it with partition pruning, e.g.
 point DuckDB at `data-prep/naomi-data/`. Re-running replaces each country's
 partition, so it is safe to repeat. Change the output root with `--out-dir`; see
 `--help` for details.
+
+## API
+
+Full schema and a try-it console are at `/docs` when the API is running.
+
+### `GET /data`
+
+Filtered rows from the indicators dataset as JSON: `{"total": <n>, "data": [ ... ]}`,
+where `total` is the number of rows matching the filters ignoring `limit`/`offset`
+(so a caller can page and show "N of total").
+
+**Filters** - to match any of several values (`OR`), repeat the parameter
+(`?indicator=a&indicator=b`) or comma-separate it (`?indicator=a,b`); different
+parameters combine with `AND`:
+
+| Parameter | Notes |
+| --- | --- |
+| `country` | ISO3, e.g. `MWI` - the partition key, so this is the cheapest filter |
+| `area_level` | integer, `0`-`4` |
+| `area_id` | e.g. `MWI`, `MWI_1_1_demo` |
+| `sex` | `both`, `female`, `male` |
+| `age_group` | e.g. `Y015_049` |
+| `calendar_quarter` | e.g. `CY2024Q3` |
+| `indicator` | e.g. `prevalence`, `art_coverage` |
+
+**Shape**
+
+| Parameter | Default | Notes |
+| --- | --- | --- |
+| `columns` | all six | Which estimate columns to return: `mean`, `se`, `median`, `mode`, `lower`, `upper`. Repeat or comma-separate. This is a projection, not a row filter - the categorical columns above are always returned. |
+| `limit` | `1000` | 1-50000 |
+| `offset` | `0` | Results are ordered by the categorical columns, so `limit`/`offset` paginate deterministically. |
+
+An unknown `columns` value, a non-integer `area_level`, or a `limit` outside the range, is a `422`.
+
+**Examples**
+
+```bash
+# HIV prevalence for 15-49s, national level, just the point estimate and CI
+curl "http://127.0.0.1:8000/data?indicator=prevalence&area_id=MWI&age_group=Y015_049&columns=mean,lower,upper"
+
+# ART coverage for two countries, women, most recent quarter
+curl "http://127.0.0.1:8000/data?indicator=art_coverage&country=MWI,ZWE&sex=female&calendar_quarter=CY2024Q3"
+```
+
+### Configuration
+
+Environment variables (or a `.env` file), all prefixed `HIVTOOLS_MCP_`:
+
+| Variable | Default | Purpose |
+| --- | --- | --- |
+| `HIVTOOLS_MCP_NAOMI_DATA_DIR` | `data-prep/naomi-data` | Root of the Parquet dataset to serve. |
+| `HIVTOOLS_MCP_DUCKDB_THREADS` | unset (one per core) | Caps threads per query; lower it if many concurrent requests oversubscribe the CPU. |
 
 ## Development
 

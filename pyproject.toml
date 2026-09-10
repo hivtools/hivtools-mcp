@@ -18,7 +18,10 @@ classifiers = [
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
 dependencies = [
+    "duckdb>=1.1",
     "fastapi[standard-no-fastapi-cloud-cli]>=0.141.1",
+    "pydantic>=2",
+    "pydantic-settings>=2.0",
 ]
 
 [project.urls]
@@ -43,6 +46,11 @@ dev = [
 
 [tool.uv]
 package = false
+
+[tool.deptry]
+# `app` is this repo's own code; there is no installed package metadata naming it
+# (see tool.uv.package) so deptry needs telling.
+known_first_party = ["app"]
 
 [tool.ty.environment]
 python = "./.venv"
@@ -107,7 +115,9 @@ ignore = [
 ]
 
 [tool.ruff.lint.per-file-ignores]
-"tests/*" = ["S101"]
+# S101: asserts are how pytest tests assert.
+# S608: test fixtures build SQL against throwaway in-memory DuckDB tables.
+"tests/*" = ["S101", "S608"]
 
 [tool.ruff.format]
 preview = true
