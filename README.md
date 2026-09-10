@@ -51,6 +51,33 @@ docker run -p 80:80 hivtools-mcp
 
 The API is then served at <http://127.0.0.1:80>.
 
+## Data preparation
+
+The API is served from a Parquet dataset built from Naomi model output zips.
+[`data-prep/extract_indicators.py`](data-prep/extract_indicators.py) takes a
+directory of zips, reads `indicators.csv` out of each one (no need to unzip
+first), keeps the columns the API needs, and writes a Hive-partitioned dataset
+keyed by `country`.
+
+```bash
+uv run --script data-prep/extract_indicators.py data-prep/raw-data
+```
+
+Every `*.zip` in the directory is processed. Each country's ISO3 code is read
+from the national (`area_level 0`) row in its data. The result is:
+
+```
+data-prep/naomi-data/
+  country=MWI/00000000.parquet
+  country=ZWE/00000000.parquet
+```
+
+Query it with partition pruning, e.g.
+`pl.scan_parquet("data-prep/naomi-data/").filter(pl.col("country") == "MWI")`, or
+point DuckDB at `data-prep/naomi-data/`. Re-running replaces each country's
+partition, so it is safe to repeat. Change the output root with `--out-dir`; see
+`--help` for details.
+
 ## Development
 
 ### Setup
