@@ -209,3 +209,6 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# data-prep: generated Parquet dataset and extracted raw archives
+data-prep/naomi-data/

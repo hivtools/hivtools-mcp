@@ -48,6 +48,11 @@ package = false
 python = "./.venv"
 python-version = "3.10"
 
+[tool.ty.src]
+# data-prep/ holds standalone PEP 723 scripts run via `uv run --script`; their
+# deps (polars, docopt) live in that ephemeral env, not the project venv.
+exclude = ["data-prep"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["."]
