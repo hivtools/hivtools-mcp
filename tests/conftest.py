@@ -7,10 +7,11 @@ from fastapi.testclient import TestClient
 
 from app import settings as settings_module
 from app.main import app
+from app.ratelimit import limiter
 
 # country, area_level, area_id, sex, age_group, calendar_quarter, indicator, mean, se, median, mode, lower, upper
 FIXTURE_ROWS = [
-    ("MWI", 0, "MWI", "both", "Y015_049", "CY2020Q3", "prevalence", 0.10, 0.010, 0.10, 0.10, 0.09, 0.11),
+    ("MWI", 0, "MWI", "both", "Y015_049", "CY2020Q3", "prevalence", 0.123456789012345, 0.010, 0.10, 0.10, 0.09, 0.11),
     ("MWI", 1, "MWI_1_1", "female", "Y015_049", "CY2020Q3", "prevalence", 0.20, 0.020, 0.20, 0.20, 0.18, 0.22),
     ("MWI", 1, "MWI_1_1", "male", "Y015_049", "CY2020Q3", "prevalence", 0.15, 0.015, 0.15, 0.15, 0.13, 0.17),
     ("ZWE", 0, "ZWE", "both", "Y050_999", "CY2021Q1", "incidence", 0.30, 0.030, 0.30, 0.30, 0.27, 0.33),
@@ -42,5 +43,8 @@ def data_dir(tmp_path_factory: pytest.TempPathFactory) -> Path:
 @pytest.fixture
 def client(data_dir: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[TestClient]:
     monkeypatch.setattr(settings_module.settings, "naomi_data_dir", data_dir)
+    # The per-IP rate limit would trip the many-request tests (all from 127.0.0.1);
+    # it has its own coverage in test_data.py.
+    monkeypatch.setattr(limiter, "enabled", False)
     with TestClient(app) as test_client:
         yield test_client

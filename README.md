@@ -86,7 +86,18 @@ partition, so it is safe to repeat. Change the output root with `--out-dir`; see
 
 ## API
 
-Full schema and a try-it console are at `/docs` when the API is running.
+Full schema and a try-it console are at `/docs` when the API is running (disabled in
+production - set `HIVTOOLS_MCP_ENABLE_DOCS=false`; `/openapi.json` stays available).
+
+### `GET /`, `GET /version`
+
+Both return `{"name": "hivtools-mcp", "version": "<pyproject version>"}`.
+
+### `GET /health`, `GET /health/ready`
+
+`/health` is a liveness check (`{"status": "ok"}`). `/health/ready` also checks the DuckDB
+connection answers a query (`{"status": "ready"}`, or `503`). Used by the Azure Container
+Apps probes.
 
 ### `GET /data`
 
@@ -113,10 +124,14 @@ parameters combine with `AND`:
 | Parameter | Default | Notes |
 | --- | --- | --- |
 | `columns` | all six | Which estimate columns to return: `mean`, `se`, `median`, `mode`, `lower`, `upper`. Repeat or comma-separate. This is a projection, not a row filter - the categorical columns above are always returned. |
-| `limit` | `1000` | 1-50000 |
+| `limit` | `1000` | 1-5000 (`HIVTOOLS_MCP_MAX_ROWS`) |
 | `offset` | `0` | Results are ordered by the categorical columns, so `limit`/`offset` paginate deterministically. |
+| `sig_figs` | `6` (`HIVTOOLS_MCP_RESPONSE_SIG_FIGS`) | Significant figures the measure values are rounded to on the way out, 1-15. The Parquet dataset keeps full model precision; this is presentation only. |
 
-An unknown `columns` value, a non-integer `area_level`, or a `limit` outside the range, is a `422`.
+An unknown `columns` value, a non-integer `area_level`, or a `limit`/`sig_figs` outside its
+range, is a `422`. `/data` is rate limited per client IP (`HIVTOOLS_MCP_DATA_RATE_LIMIT`,
+default `30/minute`); over that is a `429`. Responses carry `Cache-Control: public,
+max-age=300` (`HIVTOOLS_MCP_CACHE_MAX_AGE`).
 
 **Examples**
 
