@@ -25,7 +25,7 @@ Install the dependencies into a local virtual environment:
 uv sync
 ```
 
-### Running the API
+### Running the API & MCP
 
 For local development (reloads on file changes):
 
@@ -40,11 +40,7 @@ The API reads the Parquet dataset described in [Data preparation](#data-preparat
 build that first, or `/data` will just return nothing. By default it looks in
 `data-prep/naomi-data/` - point it elsewhere with `HIVTOOLS_MCP_NAOMI_DATA_DIR`.
 
-To run it as it runs in production:
-
-```bash
-uv run fastapi run app/main.py
-```
+The MCP server is avaialble at `/mcp`
 
 ### With Docker
 
@@ -165,6 +161,21 @@ Environment variables (or a `.env` file), all prefixed `HIVTOOLS_MCP_`:
 | `HIVTOOLS_MCP_RATE_LIMIT_ENABLED` | `true` | Master switch for the rate limiter. |
 | `HIVTOOLS_MCP_CACHE_MAX_AGE` | `300` | `Cache-Control` max-age (seconds) on `/data` responses. |
 | `HIVTOOLS_MCP_ENABLE_DOCS` | `true` | Serve the interactive `/docs` and `/redoc` consoles. Set `false` in production. |
+
+
+## MCP
+
+The MCP server is available at the `/mcp` endpoint. To test manually the MCP Inspector is the best way.
+
+1. Install and run it with
+   ```
+   npx @modelcontextprotocol/inspector
+   ```
+   This will launch it in your browser.
+1. Run the backend `make dev`
+1. In MCP Inspector add the local server. Click "Add Servers" -> "Add manually". Use "streamable-http" as the transport and the URL to the backend url which should be "localhost:8000/mcp". Click "Add".
+1. Switch the toggle to connect to the server and then click "Tools" in the top. You should see "Get Hiv Data"
+1. Click on this and you can enter content in fields. They need to be valid JSON so use quotes e.g. `"MWI"` and click "Execute Tool" to see the response data.
 
 ## Deployment
 
