@@ -19,7 +19,7 @@ from typing import Annotated, Any
 
 import duckdb
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.database import VIEW_NAME, get_cursor
 from app.ratelimit import limiter
@@ -32,10 +32,16 @@ MAX_SIG_FIGS = 15  # a float64 carries ~15-17 significant decimal digits
 
 
 class DataResponse(BaseModel):
-    # Rows matching the filters, ignoring limit/offset - lets a caller page and
-    # show "x of total" without pulling everything.
-    total: int
-    data: list[dict[str, Any]]
+    total: int = Field(
+        description="Total rows matching the filters, ignoring `limit`/`offset`."
+        " Lets a caller page and show 'x of total' without pulling everything."
+    )
+    data: list[dict[str, Any]] = Field(
+        description="The current page of matching rows. Every row includes all seven "
+        "dimension columns (country, area_level, area_id, sex, age_group, "
+        "calendar_quarter, indicator) plus whichever measure columns were "
+        "requested via `columns` (all six by default)."
+    )
 
 
 def _split(values: list[str] | None) -> list[str] | None:
@@ -115,32 +121,92 @@ def build_count_query(filters: dict[str, Sequence[Any] | None]) -> tuple[str, li
     return f"SELECT count(*) FROM {VIEW_NAME}{where_sql}", params  # noqa: S608
 
 
-@router.get("/data", response_model=DataResponse)
+@router.get(
+    "/data",
+    response_model=DataResponse,
+    operation_id="get_hiv_data",
+    summary="Query HIV epidemic indicator estimates from the Naomi model",
+)
 @limiter.limit(settings.data_rate_limit)
 def get_data(
     request: Request,  # required by slowapi's rate-limit decorator
     response: Response,
     cursor: Annotated[duckdb.DuckDBPyConnection, Depends(get_cursor)],
-    country: Annotated[list[str] | None, Query()] = None,
-    area_level: Annotated[list[str] | None, Query()] = None,
-    area_id: Annotated[list[str] | None, Query()] = None,
-    sex: Annotated[list[str] | None, Query()] = None,
-    age_group: Annotated[list[str] | None, Query()] = None,
-    calendar_quarter: Annotated[list[str] | None, Query()] = None,
-    indicator: Annotated[list[str] | None, Query()] = None,
+    country: Annotated[
+        list[str] | None,
+        Query(description="ISO3 country code, e.g. 'MWI', 'ZWE'. The partition key, so filtering by it is cheap."),
+    ] = None,
+    area_level: Annotated[
+        list[str] | None,
+        Query(
+            description="Spatial aggregation level as an integer: 0 is national, and each level up "
+            "is a finer subdivision (typically up to 4). Higher numbers mean smaller, more granular areas."
+        ),
+    ] = None,
+    area_id: Annotated[
+        list[str] | None,
+        Query(
+            description="Specific area code within `area_level`, e.g. 'MWI' for the national area or "
+            "'MWI_1_1_demo' for a level-1 subdivision. Matches the area_id used in Naomi model output; "
+            "there is no fixed list, so discover them by querying a country with no area_id filter."
+        ),
+    ] = None,
+    sex: Annotated[
+        list[str] | None,
+        Query(description="Sex the estimate applies to: 'both', 'male', or 'female'."),
+    ] = None,
+    age_group: Annotated[
+        list[str] | None,
+        Query(description="Age band as 'Y<low>_<high>', e.g. 'Y015_049' for ages 15-49 or 'Y000_999' for all ages."),
+    ] = None,
+    calendar_quarter: Annotated[
+        list[str] | None,
+        Query(description="Estimate quarter as 'CY<year>Q<quarter>', e.g. 'CY2024Q3' for Q3 2024."),
+    ] = None,
+    indicator: Annotated[
+        list[str] | None,
+        Query(
+            description="Which modelled quantity to return, e.g. 'prevalence' (HIV prevalence), "
+            "'incidence' (new infections), 'art_coverage' (proportion on ART), 'art_current' "
+            "(number currently on ART). The full set varies by model run and isn't enumerable here - "
+            "call with no `indicator` filter and inspect the `indicator` column of the response to "
+            "see what's available."
+        ),
+    ] = None,
     columns: Annotated[
         list[str] | None,
         Query(
             description=f"Measure columns to return (repeat or comma-separate). One or more of {list(MEASURES)}; defaults to all."
         ),
     ] = None,
-    limit: Annotated[int, Query(ge=1, le=settings.max_rows)] = settings.default_rows,
-    offset: Annotated[int, Query(ge=0)] = 0,
+    limit: Annotated[
+        int, Query(ge=1, le=settings.max_rows, description="Max rows to return in this page.")
+    ] = settings.default_rows,
+    offset: Annotated[
+        int,
+        Query(
+            ge=0,
+            description="Rows to skip before this page starts. Results are ordered by the "
+            "dimension columns, so paging with `limit`/`offset` is deterministic.",
+        ),
+    ] = 0,
     sig_figs: Annotated[
         int | None,
         Query(ge=1, le=MAX_SIG_FIGS, description="Significant figures for measure values; default from config."),
     ] = None,
 ) -> DataResponse:
+    """Filtered rows from the Naomi HIV model's indicator estimates.
+
+    Each row is one modelled estimate for a unique combination of the dimensions
+    (country, area_level, area_id, sex, age_group, calendar_quarter, indicator);
+    `columns` picks which summary-statistic measures (mean, se, median, mode,
+    lower, upper) come back alongside them.
+
+    Filters combine with AND across different parameters; repeating a parameter
+    or comma-separating its value is OR within that parameter, e.g.
+    `?indicator=prevalence&indicator=incidence` and `?indicator=prevalence,incidence`
+    are equivalent. Omitting a filter matches every value for that dimension.
+    """
     figs = sig_figs if sig_figs is not None else settings.response_sig_figs
     filters: dict[str, Sequence[Any] | None] = {
         "country": _split(country),
