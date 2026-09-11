@@ -50,12 +50,19 @@ uv run fastapi run app/main.py
 
 ```bash
 docker build -t hivtools-mcp .
-docker run -p 80:80 -v "$PWD/data-prep/naomi-data:/data:ro" -e HIVTOOLS_MCP_NAOMI_DATA_DIR=/data hivtools-mcp
+docker run -p 80:80 hivtools-mcp
 ```
 
-The API is then served at <http://127.0.0.1:80>. The image does not bundle the
-Parquet dataset - mount it and point `HIVTOOLS_MCP_NAOMI_DATA_DIR` at it as above;
-without it the API starts fine but `/data` returns nothing.
+The API is then served at <http://127.0.0.1:80>. The build extracts the demo
+dataset from the zips in `data-prep/raw-data/` (a first build stage runs
+[`data-prep/extract_indicators.py`](data-prep/extract_indicators.py)) and bakes it
+into the image, so a plain `docker build` always ships whatever is in
+`data-prep/raw-data/` at build time. To serve a different dataset instead, mount
+it and override the path:
+
+```bash
+docker run -p 80:80 -v "$PWD/data-prep/naomi-data:/data:ro" -e HIVTOOLS_MCP_NAOMI_DATA_DIR=/data hivtools-mcp
+```
 
 ## Data preparation
 
@@ -151,6 +158,29 @@ Environment variables (or a `.env` file), all prefixed `HIVTOOLS_MCP_`:
 | --- | --- | --- |
 | `HIVTOOLS_MCP_NAOMI_DATA_DIR` | `data-prep/naomi-data` | Root of the Parquet dataset to serve. |
 | `HIVTOOLS_MCP_DUCKDB_THREADS` | unset (one per core) | Caps threads per query; lower it if many concurrent requests oversubscribe the CPU. |
+| `HIVTOOLS_MCP_RESPONSE_SIG_FIGS` | `6` | Default significant figures for measure values in responses; a request can override with `?sig_figs=`. |
+| `HIVTOOLS_MCP_MAX_ROWS` | `5000` | Largest page `?limit=` may request. |
+| `HIVTOOLS_MCP_DEFAULT_ROWS` | `1000` | Page size when `?limit=` is omitted. |
+| `HIVTOOLS_MCP_DATA_RATE_LIMIT` | `30/minute` | Per-IP rate limit on `/data`. |
+| `HIVTOOLS_MCP_RATE_LIMIT_ENABLED` | `true` | Master switch for the rate limiter. |
+| `HIVTOOLS_MCP_CACHE_MAX_AGE` | `300` | `Cache-Control` max-age (seconds) on `/data` responses. |
+| `HIVTOOLS_MCP_ENABLE_DOCS` | `true` | Serve the interactive `/docs` and `/redoc` consoles. Set `false` in production. |
+
+## Deployment
+
+Production runs on Azure Container Apps, provisioned with Terraform in [`infra/`](infra/)
+(see [`infra/README.md`](infra/README.md) for setup).
+
+To ship a code change to production:
+
+1. Bump `version` in `pyproject.toml`.
+2. Merge to `main`.
+3. Cut a GitHub Release tagged `vX.Y.Z` matching that version.
+
+Publishing the release triggers `.github/workflows/on-release-main.yml`, which builds and
+pushes the image to Azure Container Registry tagged `vX.Y.Z`, rolls a new Container Apps
+revision, and publishes the docs site - no manual deploy step. The release tag must match
+`pyproject.toml`'s version or the deploy job fails fast.
 
 ## Development
 

@@ -1,0 +1,11 @@
+# Copy to terraform.tfvars and fill in. terraform.tfvars is gitignored.
+
+subscription_id = "00000000-0000-0000-0000-000000000000"
+
+# Optional overrides (defaults shown):
+# location                = "eastus2"
+# resource_group_name     = "rg-hivtools-mcp-prod"
+# github_repository       = "hivtools/hivtools-mcp"
+# container_registry_name = null   # auto-generated if unset
+# budget_amount           = 20
+# budget_alert_email      = "robertashton94@gmail.com"
