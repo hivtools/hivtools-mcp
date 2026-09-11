@@ -37,7 +37,11 @@ resource "azurerm_federated_identity_credential" "github_actions" {
   # Classic federated credentials (Entra app or managed identity, same rule) take
   # an exact subject, no tag wildcards - restrict which tags may deploy with the
   # GitHub environment's own deployment tag policy (v*) instead.
-  subject = "repo:${var.github_repository}:environment:${var.github_environment}"
+  #
+  # This repo's OIDC subject is the immutable format (owner/repo names suffixed
+  # with their numeric IDs) rather than the plain "repo:owner/repo:..." form -
+  # Azure compares the subject as a literal string, so it must match exactly.
+  subject = "repo:${split("/", var.github_repository)[0]}@${var.github_owner_id}/${split("/", var.github_repository)[1]}@${var.github_repo_id}:environment:${var.github_environment}"
 }
 
 resource "azurerm_role_assignment" "github_acr_push" {

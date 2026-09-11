@@ -27,6 +27,23 @@ variable "github_repository" {
   default     = "hivtools/hivtools-mcp"
 }
 
+# GitHub's OIDC subject claim for this repo is immutable (opted in, or created
+# after the July 2026 default change): it embeds these numeric IDs rather than
+# just the owner/repo names, so a renamed or deleted-and-recreated repo can't
+# inherit this trust. Read the exact format GitHub sends with:
+#   gh api repos/<owner>/<repo>/actions/oidc/customization/sub
+variable "github_owner_id" {
+  type        = string
+  description = "Numeric GitHub owner (org/user) ID, for the immutable OIDC subject claim."
+  default     = "172818267"
+}
+
+variable "github_repo_id" {
+  type        = string
+  description = "Numeric GitHub repository ID, for the immutable OIDC subject claim."
+  default     = "1363874738"
+}
+
 variable "github_environment" {
   type        = string
   description = "GitHub deployment environment the release workflow runs in (federation subject)."
