@@ -99,6 +99,20 @@ variable "budget_amount" {
   default     = 20
 }
 
+variable "budget_start_date" {
+  type        = string
+  description = <<-EOT
+    Anchor for the monthly budget period - must be the 1st of a month. Azure
+    keeps generating subsequent months on its own, so once the budget exists
+    this is never touched again (see the ignore_changes in budget.tf) and
+    doesn't need updating. It only matters again if the budget resource is
+    created fresh - Azure requires a *new* budget's start_date to be within 12
+    months in the past / 3 months in the future of the apply, so bump this to
+    the current month if a from-scratch apply ever rejects it.
+  EOT
+  default     = "2026-09-01T00:00:00Z"
+}
+
 variable "budget_alert_email" {
   type        = string
   description = "Where budget threshold alerts go."

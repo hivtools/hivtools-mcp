@@ -1,10 +1,6 @@
 # Alert-only cost guard. Azure budgets never stop spend - they email when a
 # threshold is crossed, which is enough to catch a bot-driven cost spike early.
 
-locals {
-  budget_start_date = formatdate("YYYY-MM-01'T'00:00:00Z", plantimestamp())
-}
-
 resource "azurerm_consumption_budget_resource_group" "main" {
   name              = "budget-${var.name_prefix}-prod"
   resource_group_id = azurerm_resource_group.main.id
@@ -12,7 +8,7 @@ resource "azurerm_consumption_budget_resource_group" "main" {
   time_grain        = "Monthly"
 
   time_period {
-    start_date = local.budget_start_date
+    start_date = var.budget_start_date
   }
 
   dynamic "notification" {
@@ -35,7 +31,6 @@ resource "azurerm_consumption_budget_resource_group" "main" {
   }
 
   lifecycle {
-    # start_date is recomputed each month; the budget itself doesn't need recreating.
     ignore_changes = [time_period]
   }
 }
