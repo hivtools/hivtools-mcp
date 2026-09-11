@@ -1,0 +1,14 @@
+.git
+.github
+.venv
+.pytest_cache
+.ruff_cache
+__pycache__
+.tox
+site
+docs
+tests
+data-prep/naomi-data
+infra
+coverage.xml
+.coverage

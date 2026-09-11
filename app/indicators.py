@@ -13,20 +13,22 @@ every value supplied by the caller is passed to DuckDB as a bound ``?``
 parameter, never string-formatted into the SQL.
 """
 
+import math
 from collections.abc import Sequence
 from typing import Annotated, Any
 
 import duckdb
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel
 
 from app.database import VIEW_NAME, get_cursor
+from app.ratelimit import limiter
 from app.schema import DIMENSIONS, MEASURES
+from app.settings import settings
 
 router = APIRouter()
 
-MAX_ROWS = 50_000
-DEFAULT_ROWS = 1_000
+MAX_SIG_FIGS = 15  # a float64 carries ~15-17 significant decimal digits
 
 
 class DataResponse(BaseModel):
@@ -55,6 +57,13 @@ def _levels(values: list[str] | None) -> list[int] | None:
             status_code=422,
             detail=f"area_level values must be integers, got {parsed}",
         ) from exc
+
+
+def _round_sig(value: float, sig_figs: int) -> float:
+    """Round to a number of significant figures (handles proportions and counts alike)."""
+    if value == 0 or not math.isfinite(value):
+        return value
+    return round(value, sig_figs - 1 - math.floor(math.log10(abs(value))))
 
 
 def _measures(values: list[str] | None) -> list[str]:
@@ -107,7 +116,10 @@ def build_count_query(filters: dict[str, Sequence[Any] | None]) -> tuple[str, li
 
 
 @router.get("/data", response_model=DataResponse)
+@limiter.limit(settings.data_rate_limit)
 def get_data(
+    request: Request,  # required by slowapi's rate-limit decorator
+    response: Response,
     cursor: Annotated[duckdb.DuckDBPyConnection, Depends(get_cursor)],
     country: Annotated[list[str] | None, Query()] = None,
     area_level: Annotated[list[str] | None, Query()] = None,
@@ -122,9 +134,14 @@ def get_data(
             description=f"Measure columns to return (repeat or comma-separate). One or more of {list(MEASURES)}; defaults to all."
         ),
     ] = None,
-    limit: Annotated[int, Query(ge=1, le=MAX_ROWS)] = DEFAULT_ROWS,
+    limit: Annotated[int, Query(ge=1, le=settings.max_rows)] = settings.default_rows,
     offset: Annotated[int, Query(ge=0)] = 0,
+    sig_figs: Annotated[
+        int | None,
+        Query(ge=1, le=MAX_SIG_FIGS, description="Significant figures for measure values; default from config."),
+    ] = None,
 ) -> DataResponse:
+    figs = sig_figs if sig_figs is not None else settings.response_sig_figs
     filters: dict[str, Sequence[Any] | None] = {
         "country": _split(country),
         "area_level": _levels(area_level),
@@ -139,10 +156,17 @@ def get_data(
     sql, params = build_data_query(filters, measures, limit, offset)
     cursor.execute(sql, params)
     names = [description[0] for description in cursor.description]
-    rows = [dict(zip(names, row, strict=True)) for row in cursor.fetchall()]
+    rows = [
+        {
+            name: _round_sig(value, figs) if isinstance(value, float) else value
+            for name, value in zip(names, row, strict=True)
+        }
+        for row in cursor.fetchall()
+    ]
 
     count_sql, count_params = build_count_query(filters)
     count_row = cursor.execute(count_sql, count_params).fetchone()
     total = int(count_row[0]) if count_row else 0
 
+    response.headers["Cache-Control"] = f"public, max-age={settings.cache_max_age}"
     return DataResponse(total=total, data=rows)

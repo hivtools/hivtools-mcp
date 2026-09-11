@@ -33,3 +33,64 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+  deploy-azure:
+    permissions:
+      contents: read
+      id-token: write   # Azure OIDC login
+    environment:
+      name: production
+      url: https://${{ vars.CONTAINER_APP_FQDN }}
+    runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-azure-production
+      cancel-in-progress: false
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up the environment
+        uses: ./.github/actions/setup-python-env
+
+      - name: Verify pyproject version matches the release tag
+        run: |
+          version=$(uv run python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text())['project']['version'])")
+          if [ "v$version" != "${{ github.event.release.tag_name }}" ]; then
+            echo "::error::pyproject version v$version does not match release tag ${{ github.event.release.tag_name }} - bump pyproject.toml"
+            exit 1
+          fi
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Log in to ACR
+        run: az acr login --name ${{ vars.ACR_NAME }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ vars.ACR_LOGIN_SERVER }}/hivtools-mcp:${{ github.event.release.tag_name }}
+            ${{ vars.ACR_LOGIN_SERVER }}/hivtools-mcp:latest
+
+      - name: Roll a new Container Apps revision
+        uses: azure/container-apps-deploy-action@v2
+        with:
+          containerAppName: ${{ vars.CONTAINER_APP_NAME }}
+          resourceGroup: ${{ vars.RESOURCE_GROUP }}
+          imageToDeploy: ${{ vars.ACR_LOGIN_SERVER }}/hivtools-mcp:${{ github.event.release.tag_name }}
+
+      - name: Smoke test
+        run: |
+          fqdn=${{ vars.CONTAINER_APP_FQDN }}
+          for _ in $(seq 1 30); do
+            curl -fsS "https://$fqdn/health" && break || sleep 5
+          done
+          curl -fsS "https://$fqdn/version"
+          curl -fsS "https://$fqdn/data?country=MWI&limit=1" | grep -q '"total"'

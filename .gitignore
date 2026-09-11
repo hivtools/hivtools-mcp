@@ -212,3 +212,6 @@ __marimo__/
 
 # data-prep: generated Parquet dataset and extracted raw archives
 data-prep/naomi-data/
+
+# demo dataset built from data-prep/raw-data for the container image (see Dockerfile)
+demo-data/

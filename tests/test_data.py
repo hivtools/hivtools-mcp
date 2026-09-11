@@ -6,6 +6,7 @@ from fastapi.testclient import TestClient
 
 from app import settings as settings_module
 from app.main import app
+from app.ratelimit import limiter
 from app.schema import DIMENSIONS, MEASURES
 
 ALL_COLUMNS = set(DIMENSIONS) | set(MEASURES)
@@ -57,6 +58,35 @@ def test_unknown_column_is_rejected(client: TestClient):
 
 def test_non_integer_area_level_is_rejected(client: TestClient):
     assert client.get("/data", params={"area_level": "district"}).status_code == 422
+
+
+def test_data_response_is_cacheable(client: TestClient):
+    response = client.get("/data", params={"limit": 1})
+    assert response.headers["cache-control"] == f"public, max-age={settings_module.settings.cache_max_age}"
+
+
+def test_data_is_rate_limited(data_dir: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings_module.settings, "naomi_data_dir", data_dir)
+    monkeypatch.setattr(limiter, "enabled", True)
+    limiter.reset()
+    try:
+        with TestClient(app) as unthrottled_client:
+            codes = [unthrottled_client.get("/data", params={"limit": 1}).status_code for _ in range(40)]
+    finally:
+        limiter.reset()
+    assert 200 in codes
+    assert 429 in codes
+
+
+def test_measure_values_are_rounded_to_default_sig_figs(client: TestClient):
+    row = client.get("/data", params={"country": "MWI", "area_level": "0", "sex": "both"}).json()["data"][0]
+    assert row["mean"] == 0.123457  # fixture stores 0.123456789012345; default is 6 sig figs
+
+
+def test_sig_figs_can_be_overridden_per_request(client: TestClient):
+    params = {"country": "MWI", "area_level": "0", "sex": "both", "sig_figs": 3}
+    row = client.get("/data", params=params).json()["data"][0]
+    assert row["mean"] == 0.123
 
 
 def test_total_is_the_full_match_count_not_the_page(client: TestClient):
