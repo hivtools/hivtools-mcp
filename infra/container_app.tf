@@ -63,6 +63,10 @@ resource "azurerm_container_app" "main" {
         name  = "HIVTOOLS_MCP_ENABLE_DOCS"
         value = "false"
       }
+      env {
+        name  = "HIVTOOLS_MCP_LOG_JSON"
+        value = "true"
+      }
 
       liveness_probe {
         transport = "HTTP"

@@ -42,6 +42,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
 from app.knowledge.loader import age_aliases, age_partitions, concepts, indicators
+from app.observability import UserQuestion
 from app.ratelimit import limiter
 from app.schema import FACT_VIEW
 from app.settings import settings
@@ -418,6 +419,7 @@ def search(
         Query(description="ISO3 code, e.g. 'MWI'. Scopes areas, age groups and coverage to one country."),
     ] = None,
     limit: Annotated[int, Query(ge=1, le=25, description="Maximum matches per term.")] = 5,
+    user_question: UserQuestion = None,  # logged by the MCP layer, unused here
 ) -> SearchResponse:
     """Turn the words in a question into the IDs `get_hiv_data` accepts.
 

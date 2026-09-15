@@ -38,6 +38,7 @@ from app.database import VIEW_NAME, get_cursor, get_manifest
 from app.diagnostics import diagnose
 from app.knowledge.loader import age_partitions
 from app.knowledge.loader import indicators as indicator_knowledge
+from app.observability import UserQuestion
 from app.query import count_rows, where_clause
 from app.ratelimit import limiter
 from app.schema import (
@@ -338,6 +339,7 @@ def get_data(
         int | None,
         Query(ge=1, le=MAX_SIG_FIGS, description="Significant figures for measure values; default from config."),
     ] = None,
+    user_question: UserQuestion = None,  # logged by the MCP layer, unused here
 ) -> DataResponse:
     """Filtered rows from the Naomi HIV model's indicator estimates.
 

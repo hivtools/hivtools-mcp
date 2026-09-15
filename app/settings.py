@@ -42,5 +42,14 @@ class Settings(BaseSettings):
     # is unaffected.
     enable_docs: bool = True
 
+    # Emit logs as JSON lines on stdout (for Log Analytics) rather than readable
+    # text on stderr. On in production.
+    log_json: bool = False
+    log_level: str = "INFO"
+    # How much of each tool response goes into its log line. Responses can run to
+    # thousands of rows; the head is enough to see what the model was shown, and
+    # the cap keeps a line well under the container runtime's line-splitting limit.
+    log_response_chars: int = 2_000
+
 
 settings = Settings()

@@ -12,6 +12,8 @@ dataset-wide facts live that no single tool description can carry: that this is
 demo data, that only four quarters exist, and above all which dimensions must
 never be summed. The spec makes injecting it optional, so nothing here relies on
 it alone; the same facts are enforced in responses.
+
+Every tool call is logged by ``app.observability.ToolCallLogger``.
 """
 
 from fastapi import FastAPI
@@ -19,6 +21,7 @@ from fastmcp import FastMCP
 from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
 
 from app.knowledge.loader import instructions
+from app.observability import ToolCallLogger
 
 EXCLUDED_TAGS = ("health", "meta")
 
@@ -31,4 +34,5 @@ def build_mcp_app(api_app: FastAPI, *, name: str = "hivtools", path: str = "/mcp
         route_maps=[RouteMap(tags={tag}, mcp_type=MCPType.EXCLUDE) for tag in EXCLUDED_TAGS],
     )
     mcp.instructions = instructions()
+    mcp.add_middleware(ToolCallLogger())
     return mcp.http_app(path=path)
