@@ -35,8 +35,10 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from app.database import VIEW_NAME, get_cursor, get_manifest
+from app.diagnostics import diagnose
 from app.knowledge.loader import age_partitions
 from app.knowledge.loader import indicators as indicator_knowledge
+from app.query import count_rows, where_clause
 from app.ratelimit import limiter
 from app.schema import (
     DIMENSION_LABELS,
@@ -46,6 +48,7 @@ from app.schema import (
     MEASURES,
     ORDER_BY,
 )
+from app.search import Entry, get_index
 from app.settings import settings
 
 router = APIRouter()
@@ -65,6 +68,14 @@ class DataResponse(BaseModel):
     total: int = Field(
         description="Total rows matching the filters, ignoring `limit`/`offset`."
         " Lets a caller page and show 'x of total' without pulling everything."
+    )
+    diagnostic: str | None = Field(
+        default=None,
+        description="Present only when nothing matched, saying why. Either a value is not in the "
+        "data at all (with the nearest real ones), or every value is valid but the combination "
+        "is empty - in which case it names the filter responsible and the values that would have "
+        "worked. An empty result is otherwise indistinguishable from a true negative, so read "
+        "this rather than concluding there is no data.",
     )
     data: list[dict[str, Any]] = Field(
         description="The current page of matching rows, carrying only the dimensions that "
@@ -139,23 +150,6 @@ def _measures(values: list[str] | None) -> list[str]:
     return list(dict.fromkeys(requested))
 
 
-def _where_clause(filters: dict[str, Sequence[Any] | None]) -> tuple[str, list[Any]]:
-    """Build the shared ``WHERE`` for the data and count queries.
-
-    ``filters`` keys are trusted (schema column names); all values are bound.
-    """
-    conditions: list[str] = []
-    params: list[Any] = []
-    for column, values in filters.items():
-        if not values:
-            continue
-        placeholders = ", ".join("?" for _ in values)
-        conditions.append(f'"{column}" IN ({placeholders})')
-        params.extend(values)
-    clause = f" WHERE {' AND '.join(conditions)}" if conditions else ""
-    return clause, params
-
-
 def build_data_query(
     filters: dict[str, Sequence[Any] | None],
     measures: Sequence[str],
@@ -166,15 +160,10 @@ def build_data_query(
     # Ordering by the dimension tables' sort keys, not the codes: a code sort puts
     # 'Y000_999' (all ages) in the middle of the five-year bands.
     order = ", ".join(f'"{col}"' for col in ORDER_BY)
-    where_sql, params = _where_clause(filters)
+    where_sql, params = where_clause(filters)
     # S608: identifiers are schema constants, values are all in `params`.
     sql = f"SELECT {selected} FROM {VIEW_NAME}{where_sql} ORDER BY {order} LIMIT ? OFFSET ?"  # noqa: S608
     return sql, [*params, limit, offset]
-
-
-def build_count_query(filters: dict[str, Sequence[Any] | None]) -> tuple[str, list[Any]]:
-    where_sql, params = _where_clause(filters)
-    return f"SELECT count(*) FROM {VIEW_NAME}{where_sql}", params  # noqa: S608
 
 
 def _lookup_label(cursor: duckdb.DuckDBPyConnection, dimension: str, value: Any) -> str | None:
@@ -267,6 +256,7 @@ def strip_constants(row: dict[str, Any], constants: dict[str, Any]) -> dict[str,
 @router.get(
     "/data",
     response_model=DataResponse,
+    response_model_exclude_none=True,
     operation_id="get_hiv_data",
     summary="Query HIV epidemic indicator estimates from the Naomi model",
 )
@@ -276,6 +266,7 @@ def get_data(
     response: Response,
     cursor: Annotated[duckdb.DuckDBPyConnection, Depends(get_cursor)],
     manifest: Annotated[dict[str, Any], Depends(get_manifest)],
+    index: Annotated[list[Entry], Depends(get_index)],
     country: Annotated[
         list[str] | None,
         Query(description="ISO3 country code, e.g. 'MWI', 'ZWE'. The partition key, so filtering by it is cheap."),
@@ -389,9 +380,7 @@ def get_data(
         for row in cursor.fetchall()
     ]
 
-    count_sql, count_params = build_count_query(filters)
-    count_row = cursor.execute(count_sql, count_params).fetchone()
-    total = int(count_row[0]) if count_row else 0
+    total = count_rows(cursor, filters)
 
     constants = constant_dimensions(filters, rows, total)
     meta = build_meta(cursor, constants, rows, manifest)
@@ -404,4 +393,10 @@ def get_data(
         }
 
     response.headers["Cache-Control"] = f"public, max-age={settings.cache_max_age}"
-    return DataResponse(meta=meta, total=total, data=[strip_constants(row, constants) for row in rows])
+    return DataResponse(
+        meta=meta,
+        total=total,
+        # Only paid for on the empty path, which is where the caller is stuck.
+        diagnostic=diagnose(cursor, filters, index) if total == 0 else None,
+        data=[strip_constants(row, constants) for row in rows],
+    )

@@ -135,7 +135,10 @@ def test_starts_and_serves_with_no_parquet_files(tmp_path: Path, monkeypatch: py
     with TestClient(app) as client:
         response = client.get("/data")
     assert response.status_code == 200
-    assert response.json() == {"meta": {}, "total": 0, "data": []}
+    body = response.json()
+    assert (body["meta"], body["total"], body["data"]) == ({}, 0, [])
+    # ...and says why it is empty; test_diagnostics covers the wording.
+    assert body["diagnostic"]
 
 
 # --- meta: hoisting constant dimensions out of the rows ----------------------
