@@ -8,6 +8,7 @@ demo zip that ships with the repo (about one second to load, so these run
 alongside everything else rather than behind a marker).
 """
 
+import re
 import zipfile
 from pathlib import Path
 
@@ -62,6 +63,7 @@ def all_ages_total(db: duckdb.DuckDBPyConnection) -> float:
 
 def test_every_concept_has_the_required_fields():
     for name, concept in knowledge.concepts().items():
+        assert concept.get("label"), f"{name} has no label; search would show a mangled key"
         assert concept.get("aliases"), f"{name} has no aliases, so search can never find it"
         assert concept.get("what_it_measures"), f"{name} has no definition"
         assert "notes" in concept, f"{name} has no notes; the caveats are the point of the layer"
@@ -197,6 +199,17 @@ def test_rate_indicators_are_per_person_year(db: duckdb.DuckDBPyConnection):
             continue
         high = scalar(db, "SELECT max(mean) FROM ind WHERE indicator=?", [name])
         assert 0 <= high < 1, f"{name} peaks at {high}; a per-person-year rate should be well under 1"
+
+
+def test_instructions_only_name_real_age_groups(db: duckdb.DuckDBPyConnection):
+    """Guards the drift that let instructions.md list partitions that no longer existed.
+
+    Any age-group code written into the guidance must be one the data actually
+    has; the model is told to use these verbatim.
+    """
+    groups = {record[0] for record in db.sql("SELECT DISTINCT age_group FROM ind").fetchall()}
+    mentioned = set(re.findall(r"Y\d{3}_\d{3}", knowledge.instructions()))
+    assert mentioned <= groups, f"instructions name age groups not in the data: {sorted(mentioned - groups)}"
 
 
 def test_instructions_document_stays_small():

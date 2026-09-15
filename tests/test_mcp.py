@@ -56,25 +56,34 @@ def mcp_session(client: TestClient) -> str:
     return session_id
 
 
-def test_only_the_data_route_is_exposed_as_a_tool(client: TestClient, mcp_session: str):
+def test_only_the_data_routes_are_exposed_as_tools(client: TestClient, mcp_session: str):
     tools = _rpc(client, mcp_session, "tools/list")["tools"]
-    assert [tool["name"] for tool in tools] == ["get_hiv_data"]
+    assert sorted(tool["name"] for tool in tools) == ["get_hiv_data", "search_hiv_metadata"]
 
 
-def test_tool_and_every_parameter_are_documented(client: TestClient, mcp_session: str):
-    # The tool's schema is all an MCP client has to go on when deciding how to
-    # call it - an opaque param like `area_id` or `calendar_quarter` is a guess
-    # without a description. This doesn't check wording (that'd be brittle),
-    # just that nobody adds a new filter to `get_data` without documenting it.
-    tool = _rpc(client, mcp_session, "tools/list")["tools"][0]
-    assert tool["description"]
-    properties = tool["inputSchema"]["properties"]
+def test_every_tool_and_parameter_is_documented(client: TestClient, mcp_session: str):
+    # A tool's schema is all an MCP client has to go on when deciding how to call
+    # it - an opaque param like `area_id` or `field` is a guess without a
+    # description. This doesn't check wording (that'd be brittle), just that
+    # nobody adds a parameter without documenting it.
+    for tool in _rpc(client, mcp_session, "tools/list")["tools"]:
+        assert tool["description"], tool["name"]
+        undocumented = [
+            name for name, schema in tool["inputSchema"]["properties"].items() if not schema.get("description")
+        ]
+        assert not undocumented, f"{tool['name']}: {undocumented}"
+
+
+def test_data_tool_exposes_every_filter(client: TestClient, mcp_session: str):
+    tools = {tool["name"]: tool for tool in _rpc(client, mcp_session, "tools/list")["tools"]}
+    properties = tools["get_hiv_data"]["inputSchema"]["properties"]
     assert set(properties) == {
         "country",
         "area_level",
         "area_id",
         "sex",
         "age_group",
+        "age_partition",
         "calendar_quarter",
         "indicator",
         "columns",
@@ -82,8 +91,18 @@ def test_tool_and_every_parameter_are_documented(client: TestClient, mcp_session
         "offset",
         "sig_figs",
     }
-    undocumented = [name for name, schema in properties.items() if not schema.get("description")]
-    assert not undocumented
+
+
+def test_search_tool_can_be_called(client: TestClient, mcp_session: str):
+    result = _rpc(
+        client,
+        mcp_session,
+        "tools/call",
+        {"name": "search_hiv_metadata", "arguments": {"q": ["treatment gap"], "country": "MWI"}},
+    )
+    assert result["isError"] is False
+    payload = json.loads(result["content"][0]["text"])
+    assert payload["results"][0]["results"][0]["id"] == "treatment_gap"
 
 
 def test_tool_call_returns_real_data(client: TestClient, mcp_session: str):

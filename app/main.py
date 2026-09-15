@@ -8,6 +8,7 @@ from app.health import router as health_router
 from app.indicators import router as indicators_router
 from app.mcp import build_mcp_app
 from app.ratelimit import limiter
+from app.search import router as search_router
 from app.settings import settings
 from app.version import get_name, get_version
 
@@ -22,6 +23,7 @@ app.state.limiter = limiter
 # ExceptionHandler protocol; the pairing is correct and is slowapi's documented usage.
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)  # ty: ignore[invalid-argument-type]
 app.include_router(indicators_router)
+app.include_router(search_router)
 app.include_router(health_router)
 
 

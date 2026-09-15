@@ -215,3 +215,36 @@ def test_rows_are_ordered_by_the_dimension_sort_keys(client: TestClient):
     # into the middle of the five-year bands.
     body = client.get("/data", params={"country": "MWI", "columns": "mean"}).json()
     assert [row["area_id"] for row in body["data"]] == ["MWI", "MWI_1_1", "MWI_1_1"]
+
+
+# --- age_partition: safe breakdowns without enumerating codes ----------------
+
+
+def test_age_partition_expands_to_its_age_groups(client: TestClient):
+    body = client.get("/data", params={"country": "MWI", "age_partition": "child_adult"}).json()
+    assert body["meta"]["age_partition"] == {
+        "id": "child_adult",
+        "label": "children and adults",
+        "tiles": "Y000_999",
+    }
+    # The fixture only carries Y015_049 rows, so expansion is visible in the
+    # filter rather than the result: a partition that excludes it matches nothing.
+    assert body["total"] == 0
+
+
+def test_age_partition_selects_only_its_own_groups(client: TestClient):
+    """coarse_three is not defined; children tiles Y000_014, which the fixture lacks."""
+    body = client.get("/data", params={"country": "MWI", "age_partition": "children"}).json()
+    assert body["total"] == 0
+    assert body["meta"]["age_partition"]["tiles"] == "Y000_014"
+
+
+def test_unknown_age_partition_is_rejected_with_the_valid_names(client: TestClient):
+    response = client.get("/data", params={"age_partition": "ten_year_bands"})
+    assert response.status_code == 422
+    assert "five_year_bands" in response.json()["detail"]
+
+
+def test_age_partition_and_age_group_are_mutually_exclusive(client: TestClient):
+    response = client.get("/data", params={"age_partition": "child_adult", "age_group": "Y015_049"})
+    assert response.status_code == 422

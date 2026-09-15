@@ -28,6 +28,9 @@ class Settings(BaseSettings):
     # Per-IP rate limit for /data (slowapi syntax, e.g. "30/minute"). Disable it
     # wholesale with rate_limit_enabled=False (the test suite does).
     data_rate_limit: str = "30/minute"
+    # Search is cheap (an in-memory scan of a few hundred rows) and an agent makes
+    # several calls per question, so it gets a looser limit than /data.
+    search_rate_limit: str = "120/minute"
     rate_limit_enabled: bool = True
 
     # Cache-Control max-age (seconds) sent with /data responses. The dataset only
