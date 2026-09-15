@@ -7,9 +7,11 @@ from fastapi.testclient import TestClient
 from app import settings as settings_module
 from app.main import app
 from app.ratelimit import limiter
-from app.schema import DIMENSIONS, MEASURES
+from app.schema import DIMENSIONS, LABEL_COLUMNS, MEASURES
 
-ALL_COLUMNS = set(DIMENSIONS) | set(MEASURES)
+# What a row carries when nothing is hoisted: every dimension, every label that
+# goes with one, and the requested measures.
+ALL_COLUMNS = set(DIMENSIONS) | set(LABEL_COLUMNS) | set(MEASURES)
 
 
 def test_no_filters_returns_every_row_with_every_column(client: TestClient):
@@ -38,12 +40,12 @@ def test_separate_filters_are_anded(client: TestClient):
 
 def test_columns_restricts_returned_measures(client: TestClient):
     body = client.get("/data", params=[("columns", "mean"), ("columns", "lower")]).json()
-    assert set(body["data"][0]) == set(DIMENSIONS) | {"mean", "lower"}
+    assert set(body["data"][0]) == set(DIMENSIONS) | set(LABEL_COLUMNS) | {"mean", "lower"}
 
 
 def test_columns_accepts_comma_separated(client: TestClient):
     body = client.get("/data", params={"columns": "mean,lower"}).json()
-    assert set(body["data"][0]) == set(DIMENSIONS) | {"mean", "lower"}
+    assert set(body["data"][0]) == set(DIMENSIONS) | set(LABEL_COLUMNS) | {"mean", "lower"}
 
 
 def test_filter_accepts_comma_separated(client: TestClient):
@@ -115,7 +117,8 @@ def test_filter_values_are_bound_not_interpolated(client: TestClient):
 
 
 def test_no_match_returns_empty(client: TestClient):
-    assert client.get("/data", params={"country": "ZZZ"}).json() == {"total": 0, "data": []}
+    body = client.get("/data", params={"country": "ZZZ"}).json()
+    assert (body["total"], body["data"]) == (0, [])
 
 
 def test_concurrent_requests_are_served(client: TestClient):
@@ -132,4 +135,83 @@ def test_starts_and_serves_with_no_parquet_files(tmp_path: Path, monkeypatch: py
     with TestClient(app) as client:
         response = client.get("/data")
     assert response.status_code == 200
-    assert response.json() == {"total": 0, "data": []}
+    assert response.json() == {"meta": {}, "total": 0, "data": []}
+
+
+# --- meta: hoisting constant dimensions out of the rows ----------------------
+
+
+def test_pinned_dimensions_are_hoisted_into_meta(client: TestClient):
+    params = {"country": "MWI", "indicator": "prevalence", "age_group": "Y015_049", "columns": "mean"}
+    body = client.get("/data", params=params).json()
+
+    assert body["meta"]["country"] == {"id": "MWI", "label": "Malawi"}
+    assert body["meta"]["indicator"]["id"] == "prevalence"
+    assert body["meta"]["age_group"] == {"id": "Y015_049", "label": "15-49"}
+    # ...and are gone from the rows, along with the labels that travel with them.
+    assert "indicator" not in body["data"][0]
+    assert "age_group_label" not in body["data"][0]
+
+
+def test_varying_dimensions_stay_in_rows_with_their_labels(client: TestClient):
+    body = client.get("/data", params={"country": "MWI", "columns": "mean"}).json()
+    assert "area_id" not in body["meta"]
+    assert {"area_id", "area_name"} <= set(body["data"][0])
+    assert body["data"][0]["area_name"] == "Malawi"
+
+
+def test_meta_carries_unit_and_basis_from_the_knowledge_layer(client: TestClient):
+    # Neither is in the model output; without them 0.108 could be 10.8% or 0.108%.
+    body = client.get("/data", params={"country": "MWI", "indicator": "prevalence"}).json()
+    assert body["meta"]["indicator"]["unit"] == "proportion"
+    assert body["meta"]["indicator"]["basis"] == "residents"
+
+
+def test_meta_carries_provenance_from_the_manifest(client: TestClient):
+    # The country's display name and the model run both come from the manifest,
+    # not from any column on the fact table.
+    body = client.get("/data", params={"country": "MWI"}).json()
+    assert body["meta"]["source"] == "Naomi 2.10.18 model output (mwi.zip)"
+    assert body["meta"]["country"]["label"] == "Malawi"
+
+
+def test_meta_is_populated_even_when_nothing_matched(client: TestClient):
+    # The labels come from the dimension tables here, since there is no row to
+    # read them off - and this is exactly when the caller needs telling what they
+    # actually asked for.
+    params = {"country": "MWI", "indicator": "art_coverage", "calendar_quarter": "CY2024Q3"}
+    body = client.get("/data", params=params).json()
+    assert body["total"] == 0
+    assert body["meta"]["indicator"] == {
+        "id": "art_coverage",
+        "label": "ART coverage",
+        "unit": "proportion",
+        "basis": "residents",
+    }
+    assert body["meta"]["calendar_quarter"] == {"id": "CY2024Q3", "label": "September 2024"}
+
+
+def test_a_dimension_constant_on_one_page_only_is_not_hoisted(client: TestClient):
+    """Hoisting off a partial page would mislabel every later page."""
+    # Page one is entirely MWI/prevalence, but the unpaged result also holds ZWE.
+    body = client.get("/data", params={"limit": 2}).json()
+    assert body["total"] == 4
+    assert [row["country"] for row in body["data"]] == ["MWI", "MWI"]
+    assert "country" not in body["meta"]
+    assert "indicator" not in body["meta"]
+
+
+def test_a_dimension_constant_across_a_complete_result_is_hoisted(client: TestClient):
+    # Nothing pinned the indicator, but every matching row agrees and the page is
+    # the whole result, so it is provably constant.
+    body = client.get("/data", params={"country": "MWI", "limit": 100}).json()
+    assert body["total"] == 3
+    assert body["meta"]["indicator"]["id"] == "prevalence"
+
+
+def test_rows_are_ordered_by_the_dimension_sort_keys(client: TestClient):
+    # Ordering comes from the dimension tables' sort keys rather than the codes.
+    # Age bands are the case that matters: a code sort drops 'Y000_999' (all ages)
+    # into the middle of the five-year bands.
+    body = client.get("/data", params={"country": "MWI", "columns": "mean"}).json()
+    assert [row["area_id"] for row in body["data"]] == ["MWI", "MWI_1_1", "MWI_1_1"]
