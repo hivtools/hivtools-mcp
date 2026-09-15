@@ -99,3 +99,27 @@ def test_tool_call_returns_real_data(client: TestClient, mcp_session: str):
     payload = json.loads(result["content"][0]["text"])
     assert payload["total"] == 4
     assert len(payload["data"]) == 2
+
+
+def test_initialize_returns_the_semantic_document(client: TestClient):
+    # The knowledge layer only reaches the model if it rides out on the
+    # initialize handshake, which is easy to break silently - nothing else
+    # fails when `instructions` is empty. Assert on the load-bearing claims
+    # rather than the wording, which is expected to change.
+    response = client.post(
+        "/mcp",
+        json={
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "pytest", "version": "1.0"},
+            },
+        },
+        headers=MCP_HEADERS,
+    )
+    instructions = _sse_json(response)["result"]["instructions"]
+    assert "synthetic demonstration data" in instructions
+    assert "Never sum across these dimensions" in instructions

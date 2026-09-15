@@ -1,0 +1,62 @@
+# Age-group sets that may safely be summed.
+#
+# This is the one piece of dimension knowledge with no machine-readable source.
+# The Naomi age groups mix a partition with overlapping aggregates - Y015_049 and
+# Y000_999 sit in the same column as the five-year bands - and nothing in
+# meta_age_group.csv distinguishes them. A caller who sums the column gets a
+# number several times too large, with nothing to signal it.
+#
+# A partition tiles some total exactly. Usually that total is the whole
+# population (`total_value`), but it need not be: the bands under 15 tile
+# Y000_014, not Y000_999. Set `total` on the partition when it is a
+# sub-population, or the safety check it exists for silently means nothing.
+#
+# Partitions are about *aggregation safety* - which sets may be summed. `aliases`
+# are a different job: resolving a word someone typed to an age group code.
+# meta_age_group.csv labels Y000_014 as "0-14", and nobody types "0-14".
+#
+# Unlike concept aliases, age aliases are deliberately allowed to be ambiguous.
+# "adults" really does mean either 15-49 (the prevalence convention) or 15+ (the
+# treatment convention), and search should return both and let the caller choose
+# rather than silently picking one. Do not "fix" the duplicates.
+#
+# Age-and-sex terms do not belong here. AGYW is Y015_024 *and* sex=female, which
+# a flat age map cannot express; that is a concept, in concepts.yaml.
+#
+# Consumers:
+#   loader.age_partitions()       reads `partitions`
+#   loader.age_aliases()          reads `aliases`
+#   loader.age_alias_index()      inverts `aliases` into the lookup search needs
+#   concepts.yaml                 default_disaggregation refers to partitions by name
+
+age_group:
+  total_value: Y000_999
+
+  # Plain-language names, keyed by age group code. Age bands people never name in
+  # words (Y035_039, Y055_059) are deliberately absent - their labels are enough.
+  aliases:
+    Y000_999: [all ages, everyone, whole population, total population, overall]
+    Y000_014: [children, child, kids, paediatric, pediatric, under 15, under 15s]
+    Y000_000: [infants, infant, babies, under 1, newborns]
+    Y000_004: [under fives, under 5s, under 5, young children, preschool]
+    Y010_019: [adolescents, adolescent, teenagers, teens]
+    Y015_024: [young people, youth, young adults, adolescents and young adults]
+    Y015_049: [adults, adults 15-49, reproductive age, childbearing age]
+    Y015_999: [adults, all adults, 15 and over, 15 plus, adult population]
+    Y015_064: [working age, working age adults]
+    Y050_999: [older adults, over 50, 50 and over, older people]
+    Y065_999: [elderly, over 65, 65 and over]
+
+  partitions:
+    five_year_bands:
+      label: 17 five-year bands
+      values: [Y000_004, Y005_009, Y010_014, Y015_019, Y020_024, Y025_029,
+               Y030_034, Y035_039, Y040_044, Y045_049, Y050_054, Y055_059,
+               Y060_064, Y065_069, Y070_074, Y075_079, Y080_999]
+    child_adult:
+      label: children and adults
+      values: [Y000_014, Y015_999]
+    children:
+      label: children by age band
+      total: Y000_014
+      values: [Y000_000, Y001_004, Y005_009, Y010_014]
