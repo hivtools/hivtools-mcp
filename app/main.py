@@ -7,10 +7,13 @@ from app.database import lifespan
 from app.health import router as health_router
 from app.indicators import router as indicators_router
 from app.mcp import build_mcp_app
+from app.observability import configure_logging
 from app.ratelimit import limiter
 from app.search import router as search_router
 from app.settings import settings
 from app.version import get_name, get_version
+
+configure_logging()
 
 app = FastAPI(
     title="hivtools-api",

@@ -1,6 +1,6 @@
 [project]
 name = "hivtools-mcp"
-version = "0.1.1"
+version = "0.2.0"
 description = "API and MCP server for hivtools data"
 authors = [{ name = "Rob Ashton", email = "robertashton94@gmail.com" }]
 readme = "README.md"
@@ -21,6 +21,7 @@ dependencies = [
     "duckdb>=1.1",
     "fastapi[standard-no-fastapi-cloud-cli]>=0.141.1",
     "fastmcp>=4.0.3",
+    "loguru>=0.7.3",
     "pydantic>=2",
     "pydantic-settings>=2.0",
     "pyyaml>=6.0.3",

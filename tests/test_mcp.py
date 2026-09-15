@@ -8,11 +8,16 @@ through the same path a live server does.
 
 import json
 import re
+from collections.abc import Iterator
 
 import pytest
 from fastapi.testclient import TestClient
+from loguru import logger
+
+from app.settings import settings
 
 MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
+TRACEPARENT = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 
 
 def _sse_json(response) -> dict:
@@ -22,12 +27,26 @@ def _sse_json(response) -> dict:
     return json.loads(matches[-1])
 
 
-def _rpc(client: TestClient, session_id: str, method: str, params: dict | None = None) -> dict:
+def _rpc(
+    client: TestClient, session_id: str, method: str, params: dict | None = None, headers: dict | None = None
+) -> dict:
     body = {"jsonrpc": "2.0", "id": 1, "method": method}
     if params is not None:
         body["params"] = params
-    response = client.post("/mcp", json=body, headers={**MCP_HEADERS, "mcp-session-id": session_id})
+    response = client.post("/mcp", json=body, headers={**MCP_HEADERS, "mcp-session-id": session_id, **(headers or {})})
     return _sse_json(response)["result"]
+
+
+@pytest.fixture
+def tool_logs() -> Iterator[list[dict]]:
+    """The ``extra`` fields of every tool-call log record emitted during the test."""
+    records: list[dict] = []
+    handler_id = logger.add(
+        lambda message: records.append(message.record["extra"]),
+        filter=lambda record: record["extra"].get("event") == "tool_call",
+    )
+    yield records
+    logger.remove(handler_id)
 
 
 @pytest.fixture
@@ -90,7 +109,61 @@ def test_data_tool_exposes_every_filter(client: TestClient, mcp_session: str):
         "limit",
         "offset",
         "sig_figs",
+        "user_question",
     }
+
+
+def test_tool_call_is_logged_with_what_links_it_to_a_conversation(
+    client: TestClient, mcp_session: str, tool_logs: list[dict]
+):
+    question = "What is HIV prevalence in Malawi?"
+    _rpc(
+        client,
+        mcp_session,
+        "tools/call",
+        {"name": "get_hiv_data", "arguments": {"country": ["MWI"], "limit": 1, "user_question": question}},
+        headers={"traceparent": TRACEPARENT},
+    )
+    [record] = tool_logs
+    assert record["tool"] == "get_hiv_data"
+    assert record["user_question"] == question
+    assert record["arguments"]["country"] == ["MWI"]
+    assert record["mcp_session_id"] == mcp_session
+    assert record["traceparent"] == TRACEPARENT
+    assert record["is_error"] is False
+    assert record["total"] == 3
+    assert json.loads(record["response"])["total"] == 3
+
+
+def test_logged_response_is_truncated(
+    client: TestClient, mcp_session: str, tool_logs: list[dict], monkeypatch: pytest.MonkeyPatch
+):
+    monkeypatch.setattr(settings, "log_response_chars", 10)
+    _rpc(client, mcp_session, "tools/call", {"name": "get_hiv_data", "arguments": {}})
+    [record] = tool_logs
+    assert len(record["response"]) == 10
+    assert record["response_chars"] > 10
+    # Pulled from the full response, so it survives truncation.
+    assert record["total"] == 4
+
+
+def test_empty_result_logs_its_diagnostic(client: TestClient, mcp_session: str, tool_logs: list[dict]):
+    _rpc(client, mcp_session, "tools/call", {"name": "get_hiv_data", "arguments": {"indicator": ["no_such_thing"]}})
+    [record] = tool_logs
+    assert record["total"] == 0
+    assert record["diagnostic"]
+
+
+def test_failed_tool_call_is_logged(client: TestClient, mcp_session: str, tool_logs: list[dict]):
+    _rpc(
+        client,
+        mcp_session,
+        "tools/call",
+        {"name": "search_hiv_metadata", "arguments": {"q": ["Lilongwe"], "field": ["not_a_field"]}},
+    )
+    [record] = tool_logs
+    assert record["tool"] == "search_hiv_metadata"
+    assert record["is_error"] is True
 
 
 def test_search_tool_can_be_called(client: TestClient, mcp_session: str):
