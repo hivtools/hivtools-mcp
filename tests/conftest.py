@@ -118,13 +118,18 @@ DIMS: dict[str, tuple[str, list[tuple]]] = {
         [
             ("MWI", "MWI", "Malawi", 0, "Country", None, 1),
             ("MWI", "MWI_1_1", "Northern", 1, "Region", "MWI", 2),
+            ("MWI", "MWI_3_1", "Blantyre", 3, "District", "MWI_1_1", 3),
+            ("MWI", "MWI_4_1", "Blantyre", 4, "District + Metro", "MWI_3_1", 4),
+            ("MWI", "MWI_4_2", "Blantyre City", 4, "District + Metro", "MWI_3_1", 5),
             ("ZWE", "ZWE", "Zimbabwe", 0, "Country", None, 1),
         ],
     ),
     "dim_age_group": (
         "country VARCHAR, age_group VARCHAR, age_group_label VARCHAR, age_group_sort_order BIGINT",
         [
+            ("MWI", "Y000_014", "0-14", 7),
             ("MWI", "Y015_049", "15-49", 1),
+            ("MWI", "Y015_999", "15+", 3),
             ("MWI", "Y000_999", "all ages", 5),
             ("ZWE", "Y050_999", "50+", 4),
         ],

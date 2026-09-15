@@ -8,6 +8,9 @@ comes from here rather than from a request.
 from typing import Literal, get_args
 
 # Categorical columns: queryable as filters, and the grain of a fact row.
+# DuckDB view names created by app.database over the Parquet dataset.
+FACT_VIEW = "indicators"
+
 DIMENSIONS: tuple[str, ...] = (
     "country",
     "area_level",

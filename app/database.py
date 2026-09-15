@@ -23,10 +23,11 @@ from typing import Any
 import duckdb
 from fastapi import FastAPI, Request
 
-from app.schema import EMPTY_DATASET_SQL, EMPTY_DIM_SQL
+from app.schema import EMPTY_DATASET_SQL, EMPTY_DIM_SQL, FACT_VIEW
+from app.search import build_index
 from app.settings import settings
 
-VIEW_NAME = "indicators"
+VIEW_NAME = FACT_VIEW
 FACTS_SUBDIR = "facts"
 MANIFEST_FILE = "manifest.json"
 
@@ -72,6 +73,9 @@ def load_manifest(data_dir: Path | None = None) -> dict[str, Any]:
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     app.state.db = create_connection()
     app.state.manifest = load_manifest()
+    # Built once: the whole searchable vocabulary is a few hundred rows, so this
+    # is milliseconds, and there is no cache to invalidate.
+    app.state.search_index = build_index(app.state.db)
     try:
         yield
     finally:

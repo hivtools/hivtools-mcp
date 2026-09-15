@@ -19,6 +19,7 @@
 #   answerable              bool       false => the server cannot answer this at all
 
 treatment_gap:
+  label: Treatment gap
   aliases:
     - treatment gap
     - gap in treatment
@@ -53,6 +54,7 @@ treatment_gap:
   related: [treatment_coverage, treatment_cascade, treatment_priority]
 
 hiv_burden:
+  label: HIV burden
   aliases:
     - HIV burden
     - burden of HIV
@@ -82,6 +84,7 @@ hiv_burden:
   related: [epidemic_size, prevalence_concept, age_sex_burden]
 
 prevention_priority:
+  label: Prevention prioritisation
   aliases:
     - prevention priority
     - prioritise prevention
@@ -112,6 +115,7 @@ prevention_priority:
   related: [acquisition_risk, hiv_burden]
 
 treatment_priority:
+  label: Treatment prioritisation
   aliases:
     - treatment priority
     - prioritise treatment
@@ -141,6 +145,7 @@ treatment_priority:
   related: [treatment_gap, treatment_coverage]
 
 treatment_coverage:
+  label: ART treatment coverage
   aliases:
     - treatment coverage
     - ART coverage
@@ -171,6 +176,7 @@ treatment_coverage:
   related: [treatment_gap, treatment_cascade]
 
 awareness_of_status:
+  label: Awareness of HIV status
   aliases:
     - know their status
     - aware of status
@@ -201,6 +207,7 @@ awareness_of_status:
   related: [treatment_cascade, treatment_gap]
 
 treatment_cascade:
+  label: HIV treatment cascade (95-95-95)
   aliases:
     - treatment cascade
     - care cascade
@@ -233,6 +240,7 @@ treatment_cascade:
   related: [awareness_of_status, treatment_coverage, treatment_gap]
 
 acquisition_risk:
+  label: Risk of acquiring HIV
   aliases:
     - risk of acquiring HIV
     - highest risk
@@ -259,6 +267,7 @@ acquisition_risk:
   related: [prevention_priority, age_sex_burden]
 
 age_sex_burden:
+  label: HIV burden by age and sex
   aliases:
     - burden by age
     - which age groups
@@ -287,6 +296,7 @@ age_sex_burden:
   related: [hiv_burden, acquisition_risk]
 
 epidemic_size:
+  label: Epidemic size
   aliases:
     - how many people have HIV
     - number living with HIV
@@ -307,6 +317,7 @@ epidemic_size:
   related: [hiv_burden]
 
 prevalence_concept:
+  label: HIV prevalence
   aliases:
     - prevalence
     - HIV prevalence
@@ -333,6 +344,7 @@ prevalence_concept:
   related: [hiv_burden, epidemic_size]
 
 antenatal_care:
+  label: Antenatal care (ANC)
   aliases:
     - ANC
     - antenatal
@@ -359,6 +371,7 @@ antenatal_care:
     has no vertical-transmission or infant-outcome indicator.
 
 epidemic_trend:
+  label: Change in the epidemic over time
   aliases:
     - trend
     - over time

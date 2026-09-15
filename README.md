@@ -118,11 +118,58 @@ Both return `{"name": "hivtools-mcp", "version": "<pyproject version>"}`.
 connection answers a query (`{"status": "ready"}`, or `503`). Used by the Azure Container
 Apps probes.
 
+### `GET /search`
+
+Resolves plain-language terms to the IDs `/data` accepts. Nothing in this dataset
+has a guessable ID - the treatment gap is `untreated_plhiv_num`, Lilongwe is
+`MWI_3_13_demo`, children are `Y000_014` - and guessing returns an empty result
+rather than an error, so terms are resolved here first.
+
+One index covers indicators, areas, age groups, age partitions and concepts, each
+result tagged with its `field`. Repeat `q` to resolve several terms in one call:
+
+```bash
+curl "http://127.0.0.1:8000/search?q=treatment+gap&q=children&q=Lilongwe&country=MWI"
+```
+
+| Parameter | Purpose |
+| --- | --- |
+| `q` | Term to resolve, as a user would phrase it. Repeat for several. |
+| `field` | Restrict to `concept`, `indicator`, `area`, `age_group` or `age_partition`. Omit when unsure. |
+| `country` | ISO3 code; scopes areas, age groups and coverage to one country. |
+| `limit` | Maximum matches per term (default 5). |
+
+The best match comes back in full (`detail: "full"`), the rest as summaries. For a
+concept that means the indicators it maps to, their units, the dimension values
+they actually have rows for, and the caveats that make an answer correct - all of
+which the caller needs *before* querying, not after.
+
+`ambiguous: true` means the top two matches genuinely compete - `Lilongwe` the
+district and `Lilongwe` the district+metro area, or `adults` as 15-49 versus 15+.
+Both are returned in full so the choice can be made on substance, or put to the
+user. Matches of different kinds never compete: a concept and one of the
+indicators it names both match "treatment gap", but that is not a choice.
+
+Matching is layered and dependency-free - exact, then token-set (so "burden of
+HIV" and "HIV burden" are identical), then word-boundary substring, then difflib
+for typos. At a few hundred entries that is microseconds and every score is
+explainable; rapidfuzz and DuckDB's FTS extension are the upgrade path if
+quality, not speed, becomes the limit.
+
 ### `GET /data`
 
-Filtered rows from the indicators dataset as JSON: `{"total": <n>, "data": [ ... ]}`,
-where `total` is the number of rows matching the filters ignoring `limit`/`offset`
-(so a caller can page and show "N of total").
+Filtered rows from the indicators dataset as JSON:
+`{"meta": { ... }, "total": <n>, "data": [ ... ]}`, where `total` is the number of
+rows matching the filters ignoring `limit`/`offset` (so a caller can page and show
+"N of total").
+
+Dimensions identical across every matching row are hoisted into `meta` and dropped
+from the rows - the common query pins five of the six dimensions and varies one,
+so repeating them per row is most of the payload and none of the information.
+`meta` also carries each dimension's label, the `unit` needed to interpret a value
+(`proportion` is a fraction 0-1, so `0.108` means 10.8%), and the `source` of the
+estimates. A dimension is only hoisted when it is provably constant across the
+whole result, not merely constant on the page in hand.
 
 **Filters** - to match any of several values (`OR`), repeat the parameter
 (`?indicator=a&indicator=b`) or comma-separate it (`?indicator=a,b`); different
@@ -137,6 +184,15 @@ parameters combine with `AND`:
 | `age_group` | e.g. `Y015_049` |
 | `calendar_quarter` | e.g. `CY2024Q3` |
 | `indicator` | e.g. `prevalence`, `art_coverage` |
+
+`age_partition` takes the **name** of an age-group set instead - `five_year_bands`,
+`child_adult` - and expands it to that set's age groups. The groups mix a partition
+with overlapping aggregates (`Y015_049` and `Y000_999` sit in the same column as
+the five-year bands), so a caller assembling a breakdown by hand can easily build
+one that overlaps, and nothing in the result would say so. Naming the set instead
+means the rows returned tile their population exactly and can be added up.
+`search?field=age_partition` lists what is available; it cannot be combined with
+`age_group`.
 
 **Shape**
 
@@ -169,6 +225,7 @@ Environment variables (or a `.env` file), all prefixed `HIVTOOLS_MCP_`:
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `HIVTOOLS_MCP_NAOMI_DATA_DIR` | `data-prep/naomi-data` | Root of the Parquet dataset to serve. |
+| `HIVTOOLS_MCP_SEARCH_RATE_LIMIT` | `120/minute` | Per-IP limit on `/search`; looser than `/data` since an agent makes several lookups per question. |
 | `HIVTOOLS_MCP_DUCKDB_THREADS` | unset (one per core) | Caps threads per query; lower it if many concurrent requests oversubscribe the CPU. |
 | `HIVTOOLS_MCP_RESPONSE_SIG_FIGS` | `6` | Default significant figures for measure values in responses; a request can override with `?sig_figs=`. |
 | `HIVTOOLS_MCP_MAX_ROWS` | `5000` | Largest page `?limit=` may request. |

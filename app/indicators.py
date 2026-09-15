@@ -35,6 +35,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
 from app.database import VIEW_NAME, get_cursor, get_manifest
+from app.knowledge.loader import age_partitions
 from app.knowledge.loader import indicators as indicator_knowledge
 from app.ratelimit import limiter
 from app.schema import (
@@ -99,6 +100,30 @@ def _round_sig(value: float, sig_figs: int) -> float:
     if value == 0 or not math.isfinite(value):
         return value
     return round(value, sig_figs - 1 - math.floor(math.log10(abs(value))))
+
+
+def _age_groups(age_group: list[str] | None, age_partition: str | None) -> list[str] | None:
+    """The age groups to filter on, expanding a partition name if one was given.
+
+    Expanding server-side rather than making the caller enumerate the codes is the
+    point of naming partitions at all: a caller that builds the list itself can
+    build one that overlaps, and nothing about the result would say so.
+    """
+    explicit = _split(age_group)
+    if age_partition is None:
+        return explicit
+    if explicit:
+        raise HTTPException(
+            status_code=422,
+            detail="pass either age_group or age_partition, not both",
+        )
+    partition = age_partitions().get(age_partition)
+    if partition is None:
+        raise HTTPException(
+            status_code=422,
+            detail=f"unknown age_partition {age_partition!r}; valid partitions are {sorted(age_partitions())}",
+        )
+    return list(partition["values"])
 
 
 def _measures(values: list[str] | None) -> list[str]:
@@ -292,6 +317,15 @@ def get_data(
             "see what's available."
         ),
     ] = None,
+    age_partition: Annotated[
+        str | None,
+        Query(
+            description="Name of an age-group set that tiles a population without overlapping, e.g. "
+            "'five_year_bands'. Expands to that set's age groups, so a breakdown by age can be "
+            "requested without enumerating codes or risking an overlapping selection. Find the "
+            "available names with search (field='age_partition'). Cannot be combined with `age_group`."
+        ),
+    ] = None,
     columns: Annotated[
         list[str] | None,
         Query(
@@ -338,7 +372,7 @@ def get_data(
         "area_level": _levels(area_level),
         "area_id": _split(area_id),
         "sex": _split(sex),
-        "age_group": _split(age_group),
+        "age_group": _age_groups(age_group, age_partition),
         "calendar_quarter": _split(calendar_quarter),
         "indicator": _split(indicator),
     }
@@ -361,6 +395,13 @@ def get_data(
 
     constants = constant_dimensions(filters, rows, total)
     meta = build_meta(cursor, constants, rows, manifest)
+    if age_partition is not None:
+        partition = age_partitions()[age_partition]
+        meta["age_partition"] = {
+            "id": age_partition,
+            "label": partition["label"],
+            "tiles": partition["total"],
+        }
 
     response.headers["Cache-Control"] = f"public, max-age={settings.cache_max_age}"
     return DataResponse(meta=meta, total=total, data=[strip_constants(row, constants) for row in rows])
