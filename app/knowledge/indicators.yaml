@@ -1,0 +1,42 @@
+# Per-indicator overlay. Labels and descriptions are generated from the Naomi
+# zip's meta_indicator.csv; this file adds what that file does not carry -
+# units (its format/scale columns are empty), search aliases, and caveats.
+#
+# unit: count | proportion | rate_per_person_year
+#   proportion values are 0-1: 0.108 means 10.8%.
+#   rate_per_person_year: 0.0018 means 1.8 new infections per 1,000 per year.
+#
+# basis: residents | attending | anc
+#   residents = people who live in the area; attending = people who receive care
+#   at facilities in the area. They differ substantially at district level,
+#   wherever patients cross boundaries for care.
+
+population:      {unit: count, basis: residents, aliases: [population, people, denominator, total population]}
+plhiv:           {unit: count, basis: residents, aliases: [PLHIV, people living with HIV, number with HIV, infected]}
+prevalence:      {unit: proportion, basis: residents, aliases: [prevalence, HIV prevalence, infection rate, percent with HIV]}
+incidence:       {unit: rate_per_person_year, basis: residents, aliases: [incidence, incidence rate, risk of infection, new infection rate]}
+infections:      {unit: count, basis: residents, aliases: [new infections, infections, annual infections]}
+
+art_coverage:          {unit: proportion, basis: residents, aliases: [ART coverage, treatment coverage, on treatment, proportion on ART]}
+art_current_residents: {unit: count, basis: residents, aliases: [number on ART, on treatment count, ART residents]}
+art_current:           {unit: count, basis: attending, aliases: [ART attending, receiving ART, facility ART numbers, service load]}
+
+untreated_plhiv_num:    {unit: count, basis: residents, aliases: [untreated, not on ART, treatment gap, unmet need]}
+untreated_plhiv_attend: {unit: count, basis: attending, aliases: [untreated in catchment]}
+plhiv_attend:           {unit: count, basis: attending, aliases: [PLHIV in catchment]}
+
+aware_plhiv_prop:     {unit: proportion, basis: residents, aliases: [aware of status, know their status, diagnosed proportion, first 95]}
+aware_plhiv_num:      {unit: count, basis: residents, aliases: [number aware, number diagnosed]}
+unaware_plhiv_num:    {unit: count, basis: residents, aliases: [unaware, undiagnosed, do not know their status, testing gap]}
+aware_plhiv_attend:   {unit: count, basis: attending, aliases: [aware in catchment]}
+unaware_plhiv_attend: {unit: count, basis: attending, aliases: [unaware in catchment]}
+
+anc_prevalence:   {unit: proportion, basis: anc, aliases: [ANC prevalence, antenatal prevalence, prevalence in pregnant women]}
+anc_art_coverage: {unit: proportion, basis: anc, aliases: [ANC ART coverage, prior ART coverage in pregnancy]}
+anc_clients:      {unit: count, basis: anc, aliases: [ANC clients, antenatal attendees, first ANC visits]}
+anc_plhiv:        {unit: count, basis: anc, aliases: [HIV positive ANC attendees, positive pregnant women]}
+anc_already_art:  {unit: count, basis: anc, aliases: [already on ART at ANC]}
+anc_art_new:      {unit: count, basis: anc, aliases: [ART initiations at ANC, newly started at ANC]}
+anc_known_pos:    {unit: count, basis: anc, aliases: [known positive at ANC]}
+anc_tested_pos:   {unit: count, basis: anc, aliases: [tested positive at ANC]}
+anc_tested_neg:   {unit: count, basis: anc, aliases: [tested negative at ANC]}

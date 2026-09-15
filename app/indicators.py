@@ -1,5 +1,18 @@
 """The ``/data`` endpoint: filtered reads of the indicators dataset.
 
+Response shape: dimensions that are identical across every matching row are
+hoisted into a ``meta`` block and dropped from the rows, because the common query
+here pins five of the six dimensions and varies one ("this indicator, this
+quarter, every district"). Repeating the pinned values on every row is most of
+the payload and none of the information. ``meta`` is also where a value becomes
+interpretable - the unit that says 0.108 is 10.8% rather than 0.108%, and the
+provenance that says these are demonstration figures.
+
+A dimension is only hoisted when it is *provably* constant across the whole
+result: either the caller pinned it to a single value, or this page is the entire
+result set and every row agrees. Hoisting a value that merely happens to be
+constant on page one would silently mislabel page two.
+
 Design: a single flat fact table with a fixed set of categorical dimensions and
 numeric measures maps cleanly onto REST query parameters, so that is what this
 is. Every dimension is an ``IN`` filter; ``columns`` picks which measures come
@@ -21,9 +34,17 @@ import duckdb
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from app.database import VIEW_NAME, get_cursor
+from app.database import VIEW_NAME, get_cursor, get_manifest
+from app.knowledge.loader import indicators as indicator_knowledge
 from app.ratelimit import limiter
-from app.schema import DIMENSIONS, MEASURES
+from app.schema import (
+    DIMENSION_LABELS,
+    DIMENSION_LOOKUPS,
+    DIMENSIONS,
+    LABEL_COLUMNS,
+    MEASURES,
+    ORDER_BY,
+)
 from app.settings import settings
 
 router = APIRouter()
@@ -32,15 +53,23 @@ MAX_SIG_FIGS = 15  # a float64 carries ~15-17 significant decimal digits
 
 
 class DataResponse(BaseModel):
+    meta: dict[str, Any] = Field(
+        description="Dimensions identical across every matching row, hoisted out of the rows "
+        "so they are stated once. Labelled dimensions appear as `{id, label}`. When the "
+        "indicator is one of them it also carries `unit` (`proportion` is a fraction 0-1, so "
+        "0.108 means 10.8%; `count` is people; `rate_per_person_year` is per person per year) "
+        "and `basis` (`residents` = people who live in the area, `attending` = people who "
+        "receive care there). `source` names the model run the figures come from."
+    )
     total: int = Field(
         description="Total rows matching the filters, ignoring `limit`/`offset`."
         " Lets a caller page and show 'x of total' without pulling everything."
     )
     data: list[dict[str, Any]] = Field(
-        description="The current page of matching rows. Every row includes all seven "
-        "dimension columns (country, area_level, area_id, sex, age_group, "
-        "calendar_quarter, indicator) plus whichever measure columns were "
-        "requested via `columns` (all six by default)."
+        description="The current page of matching rows, carrying only the dimensions that "
+        "vary across the result - everything else is in `meta`. A varying dimension with a "
+        "label appears as both, e.g. `area_id` alongside `area_name`. Measure columns are "
+        "whichever were requested via `columns` (all six by default)."
     )
 
 
@@ -108,8 +137,10 @@ def build_data_query(
     limit: int,
     offset: int,
 ) -> tuple[str, list[Any]]:
-    selected = ", ".join(f'"{col}"' for col in (*DIMENSIONS, *measures))
-    order = ", ".join(f'"{col}"' for col in DIMENSIONS)
+    selected = ", ".join(f'"{col}"' for col in (*DIMENSIONS, *LABEL_COLUMNS, *measures))
+    # Ordering by the dimension tables' sort keys, not the codes: a code sort puts
+    # 'Y000_999' (all ages) in the middle of the five-year bands.
+    order = ", ".join(f'"{col}"' for col in ORDER_BY)
     where_sql, params = _where_clause(filters)
     # S608: identifiers are schema constants, values are all in `params`.
     sql = f"SELECT {selected} FROM {VIEW_NAME}{where_sql} ORDER BY {order} LIMIT ? OFFSET ?"  # noqa: S608
@@ -119,6 +150,93 @@ def build_data_query(
 def build_count_query(filters: dict[str, Sequence[Any] | None]) -> tuple[str, list[Any]]:
     where_sql, params = _where_clause(filters)
     return f"SELECT count(*) FROM {VIEW_NAME}{where_sql}", params  # noqa: S608
+
+
+def _lookup_label(cursor: duckdb.DuckDBPyConnection, dimension: str, value: Any) -> str | None:
+    """Label for a dimension value from its dimension table.
+
+    Only needed when no row came back to read the denormalised label off - which
+    is exactly when the caller most needs to be told what they asked for.
+    """
+    lookup = DIMENSION_LOOKUPS.get(dimension)
+    if lookup is None:
+        return None
+    view, key, label = lookup
+    # S608: view and column names are schema constants; the value is bound.
+    row = cursor.execute(f'SELECT "{label}" FROM {view} WHERE "{key}" = ? LIMIT 1', [value]).fetchone()  # noqa: S608
+    return row[0] if row else None
+
+
+def constant_dimensions(
+    filters: dict[str, Sequence[Any] | None],
+    rows: Sequence[dict[str, Any]],
+    total: int,
+) -> dict[str, Any]:
+    """Dimensions provably identical across the whole result, not just this page.
+
+    Two ways to know: the caller pinned the dimension to one value, or this page
+    is the entire result set and every row agrees. Anything else - a value that
+    merely happens to be constant on page one - is not safe to hoist.
+    """
+    constants: dict[str, Any] = {}
+    page_is_whole_result = len(rows) == total
+    for dimension in DIMENSIONS:
+        values = filters.get(dimension)
+        if values and len(set(values)) == 1:
+            constants[dimension] = values[0]
+        elif rows and page_is_whole_result:
+            distinct = {row[dimension] for row in rows}
+            if len(distinct) == 1:
+                constants[dimension] = distinct.pop()
+    return constants
+
+
+def build_meta(
+    cursor: duckdb.DuckDBPyConnection,
+    constants: dict[str, Any],
+    rows: Sequence[dict[str, Any]],
+    manifest: dict[str, Any],
+) -> dict[str, Any]:
+    """The hoisted dimensions, plus what makes their values interpretable."""
+    meta: dict[str, Any] = {}
+    for dimension, value in constants.items():
+        label_column = DIMENSION_LABELS.get(dimension)
+        if label_column is None:
+            meta[dimension] = value
+            continue
+        label = rows[0][label_column] if rows else _lookup_label(cursor, dimension, value)
+        meta[dimension] = {"id": value, "label": label} if label is not None else {"id": value}
+
+    # Units and basis are not in the model output; they come from the knowledge
+    # layer, and without them a proportion is indistinguishable from a percentage.
+    indicator = constants.get("indicator")
+    if indicator is not None:
+        spec = indicator_knowledge().get(indicator)
+        if spec is not None:
+            meta["indicator"] = {**meta["indicator"], "unit": spec["unit"], "basis": spec["basis"]}
+
+    # The country's display name and its provenance both come from the manifest;
+    # neither is a column on the fact table.
+    country = constants.get("country")
+    entry = manifest.get(country) if country is not None else None
+    if entry is not None:
+        meta["source"] = entry["source"]
+        label = entry.get("country_label")
+        if label:
+            meta["country"] = {"id": country, "label": label}
+    else:
+        sources = sorted({item["source"] for item in manifest.values() if item.get("source")})
+        if len(sources) == 1:
+            meta["source"] = sources[0]
+        elif sources:
+            meta["source"] = sources
+    return meta
+
+
+def strip_constants(row: dict[str, Any], constants: dict[str, Any]) -> dict[str, Any]:
+    """Drop hoisted dimensions, and the label columns that travel with them."""
+    hoisted = set(constants) | {DIMENSION_LABELS[name] for name in constants if name in DIMENSION_LABELS}
+    return {name: value for name, value in row.items() if name not in hoisted}
 
 
 @router.get(
@@ -132,6 +250,7 @@ def get_data(
     request: Request,  # required by slowapi's rate-limit decorator
     response: Response,
     cursor: Annotated[duckdb.DuckDBPyConnection, Depends(get_cursor)],
+    manifest: Annotated[dict[str, Any], Depends(get_manifest)],
     country: Annotated[
         list[str] | None,
         Query(description="ISO3 country code, e.g. 'MWI', 'ZWE'. The partition key, so filtering by it is cheap."),
@@ -202,6 +321,12 @@ def get_data(
     `columns` picks which summary-statistic measures (mean, se, median, mode,
     lower, upper) come back alongside them.
 
+    Dimensions that are the same for every matching row are returned once in
+    `meta` rather than repeated on each row, so read `meta` first: it carries the
+    labels, the `unit` needed to interpret a value, and the `source` of the
+    estimates. Rows carry only what varies, with labels alongside codes
+    (`area_id` and `area_name`).
+
     Filters combine with AND across different parameters; repeating a parameter
     or comma-separating its value is OR within that parameter, e.g.
     `?indicator=prevalence&indicator=incidence` and `?indicator=prevalence,incidence`
@@ -234,5 +359,8 @@ def get_data(
     count_row = cursor.execute(count_sql, count_params).fetchone()
     total = int(count_row[0]) if count_row else 0
 
+    constants = constant_dimensions(filters, rows, total)
+    meta = build_meta(cursor, constants, rows, manifest)
+
     response.headers["Cache-Control"] = f"public, max-age={settings.cache_max_age}"
-    return DataResponse(total=total, data=rows)
+    return DataResponse(meta=meta, total=total, data=[strip_constants(row, constants) for row in rows])

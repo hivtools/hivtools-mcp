@@ -64,9 +64,9 @@ docker run -p 80:80 -v "$PWD/data-prep/naomi-data:/data:ro" -e HIVTOOLS_MCP_NAOM
 
 The API is served from a Parquet dataset built from Naomi model output zips.
 [`data-prep/extract_indicators.py`](data-prep/extract_indicators.py) takes a
-directory of zips, reads `indicators.csv` out of each one (no need to unzip
-first), keeps the columns the API needs, and writes a Hive-partitioned dataset
-keyed by `country`.
+directory of zips, reads each one without unzipping, and writes a fact table, the
+dimension tables that label it, and a provenance manifest - all Hive-partitioned
+by `country`.
 
 ```bash
 uv run --script data-prep/extract_indicators.py data-prep/raw-data
@@ -77,15 +77,31 @@ from the national (`area_level 0`) row in its data. The result is:
 
 ```
 data-prep/naomi-data/
-  country=MWI/00000000.parquet
-  country=ZWE/00000000.parquet
+  manifest.json                          provenance, keyed by country
+  facts/country=MWI/00000000.parquet     indicators.csv + labels + sort keys
+  dim_area/country=MWI/00000000.parquet  meta_area.csv
+  dim_age_group/country=MWI/...          meta_age_group.csv
+  dim_period/country=MWI/...             meta_period.csv
+  dim_indicator/country=MWI/...          meta_indicator.csv
 ```
 
+The labels are denormalised onto the fact table as well as kept in the dimension
+tables. That costs about 0.1% on disk - Parquet dictionary-encodes the repeated
+strings - and saves a join on every request. The dimension tables stay because
+they are the source of truth for labels, they are what a name lookup scans (70
+area rows rather than 400,000), and they are where the API reads labels from when
+a query matches no rows and has to explain what was asked for.
+
+`manifest.json` records, per country, the Naomi version that produced the output,
+the input files it was built from (including the PJNZ), the fit options, and
+whether the data is a demonstration dataset. That last one is derived from the
+data rather than configured, so it cannot be set wrong in a deployment.
+
 Query it with partition pruning, e.g.
-`pl.scan_parquet("data-prep/naomi-data/").filter(pl.col("country") == "MWI")`, or
-point DuckDB at `data-prep/naomi-data/`. Re-running replaces each country's
-partition, so it is safe to repeat. Change the output root with `--out-dir`; see
-`--help` for details.
+`pl.scan_parquet("data-prep/naomi-data/facts/").filter(pl.col("country") == "MWI")`,
+or point DuckDB at the same path. Re-running replaces each country's partition
+and merges that country into the manifest, so it is safe to repeat. Change the
+output root with `--out-dir`; see `--help` for details.
 
 ## API
 
