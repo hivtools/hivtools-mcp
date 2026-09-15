@@ -163,6 +163,25 @@ Filtered rows from the indicators dataset as JSON:
 rows matching the filters ignoring `limit`/`offset` (so a caller can page and show
 "N of total").
 
+When nothing matches, the response carries a `diagnostic` explaining why - either
+a value the dataset does not define (with the nearest real ones, via the same
+matcher `/search` uses) or a valid combination with no rows, naming the filter
+responsible and the values that would have worked:
+
+```
+Unknown indicator 'treatment_gap'. Did you mean: untreated_plhiv_num (PLHIV not
+on ART), art_coverage (ART coverage)? Use search(field='indicator').
+
+No rows matched. Dropping calendar_quarter would return 8316 rows. Under your
+other filters calendar_quarter can be: CY2020Q3, CY2023Q4, CY2024Q3 - you asked
+for CY2025Q3. (Relaxing indicator would also return rows.)
+```
+
+It is computed only on the empty path, by re-counting with each filter dropped in
+turn and reporting the narrowest blocker. An empty result is otherwise
+indistinguishable from a true negative, which is this API's worst failure mode: a
+caller either reports "no data", which is wrong, or retries at random.
+
 Dimensions identical across every matching row are hoisted into `meta` and dropped
 from the rows - the common query pins five of the six dimensions and varies one,
 so repeating them per row is most of the payload and none of the information.

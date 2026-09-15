@@ -14,6 +14,12 @@ The dataset currently served is **synthetic demonstration data**, not official e
 3. If `search` returns `ambiguous: true`, the top matches are genuinely different
    answers. Choose deliberately, and ask the user when the choice changes the
    result.
+4. If `get_hiv_data` returns no rows it also returns a `diagnostic` saying why.
+   **Read it before concluding anything.** It distinguishes a value that does not
+   exist (with the nearest real ones) from a valid combination that has no data
+   (naming the filter at fault and the values that would have worked). Never
+   report "there is no data" from an empty result you have not read the
+   `diagnostic` for - the usual cause is a filter you can simply change.
 
 Each match says which `field` it is, and that determines what to do with it:
 
