@@ -1,6 +1,10 @@
-# Age-group sets that may safely be summed.
+# Dimension knowledge the data does not carry: which age-group sets may safely
+# be summed, and the words people use for age groups and risk groups.
 #
-# This is the one piece of dimension knowledge with no machine-readable source.
+# Age groups
+# ----------
+#
+# Which age-group sets may safely be summed has no machine-readable source.
 # The Naomi age groups mix a partition with overlapping aggregates - Y015_049 and
 # Y000_999 sit in the same column as the five-year bands - and nothing in
 # meta_age_group.csv distinguishes them. A caller who sums the column gets a
@@ -60,3 +64,25 @@ age_group:
       label: children by age band
       total: Y000_014
       values: [Y000_000, Y001_004, Y005_009, Y010_014]
+
+# Behavioural risk groups, from SHIPP. Labels come from the data; these are the
+# words people use for them. `all` - the whole population, and the only group
+# Naomi and Spectrum have - is deliberately absent: it is what a query gets
+# without asking, and never needs resolving.
+#
+# Within one sex the groups are mutually exclusive and add up to the whole
+# population, so summing them is safe. Which groups exist differs by sex: female
+# sex workers only in women, MSM and PWID only in men, the rest in both. For
+# sex=both each group is carried over from the sex(es) it exists in, so the six
+# groups add up to the both-sexes total too.
+#
+# Consumers:
+#   loader.risk_group_aliases()   reads `aliases`
+risk_group:
+  aliases:
+    sexpaid12m: [sex workers, female sex workers, FSW, women who sell sex, commercial sex workers, transactional sex]
+    msm: [MSM, men who have sex with men, gay men, gay and bisexual men]
+    pwid: [PWID, people who inject drugs, injecting drug users, IDU, men who inject drugs]
+    nosex12m: [not sexually active, no sex, sexually inactive, abstinent]
+    sexcohab: [cohabiting, married, one regular partner, regular partner, marital partner, stable partner]
+    sexnonreg: [non-regular partners, casual partners, multiple partners, non-regular partner]

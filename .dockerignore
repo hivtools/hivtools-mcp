@@ -9,6 +9,12 @@ site
 docs
 tests
 data-prep/naomi-data
+# Private inputs never enter the build context; see the Dockerfile for how the
+# data built from them gets into the image. raw-data holds only the demo inputs.
+data-prep/private-data
+data-prep/raw-data/*
+!data-prep/raw-data/datasets.yaml
+!data-prep/raw-data/naomi_output_malawi.zip
 infra
 coverage.xml
 .coverage

@@ -56,8 +56,6 @@ resource "azurerm_container_app" "main" {
       cpu    = var.cpu
       memory = var.memory
 
-      # The image refuses to start without this (HIVTOOLS_MCP_REQUIRE_AUTH).
-      # The dataset's path is set by the image itself.
       env {
         name        = "HIVTOOLS_MCP_API_TOKEN"
         secret_name = "api-token"

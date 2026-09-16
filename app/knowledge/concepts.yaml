@@ -11,8 +11,10 @@
 # Schema:
 #   aliases                 list[str]  alternate phrasings users actually type
 #   what_it_measures        str        one-line definition
-#   indicators              list       {id, role, note?} - role: primary | secondary | denominator
-#   default_disaggregation  map        sensible defaults when the user didn't say
+#   indicators              list       {id, role, source?, note?} - role: primary | secondary | denominator;
+#                                      source: which model to query it from, when it matters
+#   default_disaggregation  map        sensible defaults when the user didn't say, including the
+#                                      source - the same indicator can come from several models
 #   cascade_stage           str?       position in the UNAIDS 95-95-95 cascade
 #   notes                   str        traps, caveats, why indicators disagree
 #   related                 list[str]? other concept ids
@@ -43,6 +45,7 @@ treatment_gap:
     - id: plhiv
       role: denominator
   default_disaggregation:
+    source: naomi
     age_group: Y015_999
     sex: both
   notes: >-
@@ -74,6 +77,7 @@ hiv_burden:
       role: secondary
       note: Proportion of the population living with HIV. A rate, not a count.
   default_disaggregation:
+    source: naomi
     age_group: Y015_049
     sex: both
   notes: >-
@@ -81,7 +85,7 @@ hiv_burden:
     answers: a small district can have high prevalence but few PLHIV, and a large
     urban district the reverse. If the user has not said which they mean, either
     report both or ask. "Highest burden" most often means plhiv.
-  related: [epidemic_size, prevalence_concept, age_sex_burden]
+  related: [epidemic_size, age_sex_burden, key_populations]
 
 prevention_priority:
   label: Prevention prioritisation
@@ -104,6 +108,7 @@ prevention_priority:
       role: secondary
       note: Absolute number of new infections per year. Use for "where are the most infections".
   default_disaggregation:
+    source: naomi
     age_group: Y015_049
     sex: both
   notes: >-
@@ -111,8 +116,9 @@ prevention_priority:
     infections (count); these rank differently. Rate targets where individuals
     are most at risk; count targets where the most infections could be averted.
     Programme prioritisation usually wants both. Incidence is a
-    rate_per_person_year - 0.0018 is 1.8 per 1,000 per year.
-  related: [acquisition_risk, hiv_burden]
+    rate_per_person_year - 0.0018 is 1.8 per 1,000 per year. For prevention
+    by behavioural risk group (sex workers, MSM, PWID), see key_populations.
+  related: [acquisition_risk, hiv_burden, key_populations]
 
 treatment_priority:
   label: Treatment prioritisation
@@ -136,6 +142,7 @@ treatment_priority:
     - id: prevalence
       role: secondary
   default_disaggregation:
+    source: naomi
     age_group: Y015_999
     sex: both
   notes: >-
@@ -167,6 +174,7 @@ treatment_coverage:
       role: secondary
       note: Number receiving ART at facilities in the area (catchment/service load).
   default_disaggregation:
+    source: naomi
     age_group: Y015_999
     sex: both
   notes: >-
@@ -199,6 +207,7 @@ awareness_of_status:
       role: secondary
       note: Count who do not know. Use for "testing gap" framed as a number.
   default_disaggregation:
+    source: naomi
     age_group: Y015_999
     sex: both
   notes: >-
@@ -228,6 +237,7 @@ treatment_cascade:
     - id: plhiv
       role: denominator
   default_disaggregation:
+    source: naomi
     age_group: Y015_999
     sex: both
   notes: >-
@@ -246,9 +256,7 @@ acquisition_risk:
     - highest risk
     - who is most at risk
     - most at risk
-    - risk groups
     - vulnerable populations
-    - key populations
   what_it_measures: Which age and sex groups face the highest per-person risk of acquiring HIV.
   indicators:
     - id: incidence
@@ -257,14 +265,16 @@ acquisition_risk:
     - id: infections
       role: secondary
   default_disaggregation:
+    source: naomi
     sex: [male, female]
     age_group: five_year_bands
   notes: >-
     For age/sex risk questions, request sex=male and sex=female separately -
     sex=both hides the large male/female difference that is the point of the
-    question. This dataset has no key-population (sex worker, MSM, PWID)
-    disaggregation; if asked about key populations, say so.
-  related: [prevention_priority, age_sex_burden]
+    question. Naomi has no key-population (sex worker, MSM, PWID) breakdown;
+    where a country has SHIPP estimates, key_populations covers risk by
+    behaviour.
+  related: [prevention_priority, age_sex_burden, key_populations]
 
 age_sex_burden:
   label: HIV burden by age and sex
@@ -286,6 +296,7 @@ age_sex_burden:
     - id: population
       role: denominator
   default_disaggregation:
+    source: naomi
     sex: [male, female]
     age_group: five_year_bands
   notes: >-
@@ -311,10 +322,15 @@ epidemic_size:
     - id: population
       role: denominator
   default_disaggregation:
+    source: naomi
     age_group: Y000_999
     sex: both
-  notes: For a national total use area_level=0; do not sum districts and levels together.
-  related: [hiv_burden]
+  notes: >-
+    For a national total use area_level=0; do not sum districts and levels
+    together. Naomi gives the recent, subnational picture; for the national
+    number over many years use source=spectrum (see epidemic_trend). The two are
+    separate estimates of the same thing - pick one, never add them.
+  related: [hiv_burden, epidemic_trend]
 
 antenatal_care:
   label: Antenatal care (ANC)
@@ -336,6 +352,7 @@ antenatal_care:
     - id: anc_plhiv
       role: secondary
   default_disaggregation:
+    source: naomi
     sex: female
   notes: >-
     ANC indicators are female-only and use 12 age groups rather than 33. They
@@ -356,15 +373,129 @@ epidemic_trend:
     - time series
     - epidemic trajectory
     - how has the epidemic changed
-  what_it_measures: How the epidemic has changed over time.
-  answerable: false
-  indicators: []
+    - projection
+    - future
+  what_it_measures: How the epidemic has changed over time, nationally.
+  indicators:
+    - id: plhiv
+      role: primary
+      source: spectrum
+      note: People living with HIV at each year's end.
+    - id: infections
+      role: primary
+      source: spectrum
+      note: New infections during each year.
+    - id: aids_deaths
+      role: primary
+      source: spectrum
+      note: AIDS deaths during each year.
+    - id: art_current
+      role: secondary
+      source: spectrum
+      note: Number on ART.
+    - id: population
+      role: denominator
+      source: spectrum
+  default_disaggregation:
+    source: spectrum
+    area_level: 0
+    age_group: Y000_999
+    sex: both
   notes: >-
-    NOT ANSWERABLE beyond a very short window. Naomi estimates only a handful
-    of quarters spanning a few years, and not every indicator covers all of
-    them. Do not fit a trend to those points and describe it as a 5-, 10- or
-    20-year change. Resolve the actual coverage, tell the user the span the data
-    covers, offer the earliest-to-latest comparison if that is useful, and say
-    that longer trends require Spectrum/PJNZ national estimates, which this
-    server does not yet serve.
-  related: [hiv_burden, prevalence_concept]
+    Long-term trends come from Spectrum (source=spectrum): national only, one
+    value a year from 1970, for countries that have it - check coverage. Years
+    after the current one are projections, not estimates of what happened; say
+    so. Spectrum has no uncertainty intervals and no rate indicators: a rate
+    such as prevalence can be derived from the counts (plhiv / population), and
+    should be reported as derived. Naomi covers only a handful of recent
+    quarters: never fit a trend to those points and describe it as a 5-, 10- or
+    20-year change. Where a country has no Spectrum data, say that the data does
+    not cover the period asked about.
+  related: [epidemic_size, aids_mortality, hiv_burden]
+
+aids_mortality:
+  label: AIDS deaths
+  aliases:
+    - AIDS deaths
+    - AIDS mortality
+    - HIV mortality
+    - dying of AIDS
+    - died of AIDS
+    - how many people die
+    - death toll
+  what_it_measures: The number of people who die of AIDS-related causes each year.
+  indicators:
+    - id: aids_deaths
+      role: primary
+      source: spectrum
+      note: Deaths during the year, national.
+    - id: plhiv
+      role: denominator
+      source: spectrum
+  default_disaggregation:
+    source: spectrum
+    area_level: 0
+    age_group: Y000_999
+    sex: both
+  notes: >-
+    National only, from Spectrum, for countries that have it - check coverage.
+    Naomi does not estimate deaths, so there is no subnational figure; say so if
+    asked for one. This is a count of deaths in a calendar year, not a rate.
+    Years after the current one are projections.
+  related: [epidemic_trend, epidemic_size]
+
+key_populations:
+  label: Key and priority populations
+  aliases:
+    - key populations
+    - key population
+    - priority populations
+    - risk groups
+    - behavioural risk groups
+    - high risk groups
+    - sexual behaviour
+    - sexual risk
+    - population size estimates
+    - size estimates
+    - SHIPP
+  what_it_measures: >-
+    Population size, people living with HIV and new infections among adults
+    split by sexual behaviour, including female sex workers, men who have sex
+    with men and people who inject drugs.
+  indicators:
+    - id: population
+      role: primary
+      source: shipp
+      note: Size of each risk group.
+    - id: incidence
+      role: primary
+      source: shipp
+      note: Per-person risk in each group - use for "who is most at risk".
+    - id: infections
+      role: secondary
+      source: shipp
+      note: New infections per year in each group - use for "where do most infections occur".
+    - id: plhiv
+      role: secondary
+      source: shipp
+    - id: prevalence
+      role: secondary
+      source: shipp
+  default_disaggregation:
+    source: shipp
+    age_group: Y015_049
+    sex: [female, male]
+  notes: >-
+    Only for countries with SHIPP estimates (source=shipp) - check coverage;
+    Naomi and Spectrum have no risk-group breakdown. SHIPP covers adults 15-49
+    for a single quarter: that of the Naomi round it was built from, which is
+    often older than the Naomi estimates served, so its totals will not match
+    Naomi's and must not be combined with them. The groups differ by sex:
+    female sex workers (sexpaid12m) are women only; MSM and PWID are men only;
+    no sex, one cohabiting partner and non-regular partner(s) exist for both.
+    Within one sex the groups are mutually exclusive and add up to the whole
+    population, so they can be summed; under sex=both, the single-sex groups
+    carry that sex's figures. Omit risk_group to get every group. Group sizes
+    are modelled, not counted, and have no uncertainty intervals. A small group
+    can have very high incidence but few infections - report both.
+  related: [acquisition_risk, prevention_priority]

@@ -24,6 +24,27 @@ test: ## Test the code with pytest
 dev: ## Run the API locally with autoreload
 	@uv run fastapi dev app/main.py
 
+PRIVATE_DATA ?= data-prep/private-data
+DATA_DIR ?= data-prep/naomi-data
+# The Spectrum/SHIPP extractor's R packages. SpectrumUtils uses reshape2 and
+# lubridate without declaring them, so they are listed here for it.
+R_PACKAGES = dplyr tibble tidyr readr openxlsx arrow reshape2 lubridate rlglaubius/SpectrumUtils
+
+.PHONY: data
+data: ## Rebuild the dataset: the committed demo data, plus data-prep/private-data if checked out
+	@rm -rf $(DATA_DIR)
+	@uv run --script data-prep/extract_indicators.py data-prep/raw-data/datasets.yaml $(wildcard $(PRIVATE_DATA)/datasets.yaml) --out-dir $(DATA_DIR)
+
+.PHONY: r-deps
+r-deps: ## Install the R packages needed to build Spectrum and SHIPP data
+	@Rscript -e 'repos <- getOption("repos"); if (is.null(repos) || identical(unname(repos["CRAN"]), "@CRAN@")) options(repos = c(CRAN = "https://cloud.r-project.org"))' \
+		-e 'if (!requireNamespace("pak", quietly = TRUE)) install.packages("pak")' \
+		-e 'pak::pak(strsplit("$(R_PACKAGES)", " ")[[1]])'
+
+.PHONY: docker
+docker: data ## Build the image, serving the dataset `make data` builds
+	@docker build --build-context data=$(DATA_DIR) -t hivtools-mcp .
+
 .PHONY: docs-test
 docs-test: ## Test if documentation can be built without warnings or errors
 	@uv run mkdocs build -s

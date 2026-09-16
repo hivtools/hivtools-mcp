@@ -2,6 +2,10 @@
 # zip's meta_indicator.csv; this file adds what that file does not carry -
 # units (its format/scale columns are empty), search aliases, and caveats.
 #
+# One entry per indicator ID, whichever source(s) it comes from: an ID means the
+# same quantity in Naomi, Spectrum and SHIPP. Indicators Naomi does not have
+# (aids_deaths, from Spectrum) are labelled in data-prep/extract_spectrum_shipp.R.
+#
 # unit: count | proportion | rate_per_person_year
 #   proportion values are 0-1: 0.108 means 10.8%.
 #   rate_per_person_year: 0.0018 means 1.8 new infections per 1,000 per year.
@@ -16,6 +20,7 @@ plhiv:           {unit: count, basis: residents, aliases: [PLHIV, people living 
 prevalence:      {unit: proportion, basis: residents, aliases: [prevalence, HIV prevalence, infection rate, percent with HIV]}
 incidence:       {unit: rate_per_person_year, basis: residents, aliases: [incidence, incidence rate, risk of infection, new infection rate]}
 infections:      {unit: count, basis: residents, aliases: [new infections, infections, annual infections]}
+aids_deaths:     {unit: count, basis: residents, aliases: [AIDS deaths, AIDS-related deaths, HIV deaths, HIV-related deaths, deaths, mortality]}
 
 art_coverage:          {unit: proportion, basis: residents, aliases: [ART coverage, treatment coverage, on treatment, proportion on ART]}
 art_current_residents: {unit: count, basis: residents, aliases: [number on ART, on treatment count, ART residents]}

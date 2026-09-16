@@ -1,0 +1,15 @@
+# Countries to build from this directory, and the files each is built from.
+# Paths are relative to this file. See data-prep/extract_indicators.py.
+#
+#   <ISO3>:
+#     label:    how the figures should be described (optional; defaults to the
+#               country name from the Naomi output)
+#     naomi:    Naomi model output zip (required)
+#     spectrum: Spectrum .pjnz (optional; national time series)
+#     shipp:    SHIPP workbook .xlsx (optional; behavioural risk groups)
+#
+# Only public demonstration data belongs here - this directory is committed.
+# Private inputs go in data-prep/private-data/, which has its own datasets.yaml.
+
+MWI:
+  naomi: naomi_output_malawi.zip

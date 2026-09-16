@@ -2,13 +2,13 @@
 
 Nothing in this dataset has a guessable ID. ``untreated_plhiv_num`` is what a
 user calls a "treatment gap", ``MWI_3_13_demo`` is Lilongwe, ``Y000_014`` is
-"children". A model that guesses gets a silently empty result, so it needs a way
-to look them up.
+"children", ``sexpaid12m`` is female sex workers. A model that guesses gets a
+silently empty result, so it needs a way to look them up.
 
 One index, not one per dimension. The whole searchable vocabulary - indicators,
-areas, age groups, age partitions and concepts - is a few hundred rows per
-country, so it all goes in one list with a ``field`` tag, and ``field`` is an
-optional filter rather than a required argument. That matters because the caller
+areas, age groups, age partitions, risk groups and concepts - is a few hundred
+rows per country, so it all goes in one list with a ``field`` tag, and ``field``
+is an optional filter rather than a required argument. That matters because the caller
 often does not know which dimension a word belongs to: "all ages" could be an age
 group or a concept, "district" is an area level, "children" is an age group.
 
@@ -41,7 +41,7 @@ import duckdb
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.knowledge.loader import age_aliases, age_partitions, concepts, indicators
+from app.knowledge.loader import age_aliases, age_partitions, concepts, indicators, risk_group_aliases
 from app.observability import UserQuestion
 from app.ratelimit import limiter
 from app.schema import FACT_VIEW
@@ -57,13 +57,13 @@ STOPWORDS = frozenset({"a", "an", "and", "at", "by", "for", "in", "of", "on", "t
 # an age group is small enough that there is no fat version to hold back.
 DETAILED_FIELDS = frozenset({"concept", "indicator"})
 
-FIELDS = ("concept", "indicator", "area", "age_group", "age_partition")
+FIELDS = ("concept", "indicator", "area", "age_group", "age_partition", "risk_group")
 
 # Ties are broken towards the kind of match that tells the caller most. A concept
 # subsumes the indicators it names, so when both match a phrase equally well -
 # "treatment gap" is a concept and an alias of untreated_plhiv_num - the concept
 # is the more useful answer, not a competing one.
-FIELD_PRIORITY = {"concept": 0, "indicator": 1, "age_group": 2, "age_partition": 3, "area": 4}
+FIELD_PRIORITY = {"concept": 0, "indicator": 1, "age_group": 2, "age_partition": 3, "risk_group": 4, "area": 5}
 
 # A result is ambiguous when the runner-up is nearly as good as the winner and
 # both are real candidates: "Lilongwe" the district vs the district+metro area,
@@ -73,6 +73,15 @@ AMBIGUITY_MARGIN = 6.0
 AMBIGUITY_FLOOR = 85.0
 MATCH_FLOOR = 55.0
 MAX_DETAILED = 2
+
+# Spectrum has a value for every year since 1970. Listing them all in every
+# search result costs tokens and says nothing a span does not.
+MAX_LISTED_QUARTERS = 8
+
+# The whole-population risk group every Naomi and Spectrum row has. Never worth
+# resolving - it is what a query gets by default - and "all" would otherwise
+# match every phrase containing the word.
+WHOLE_POPULATION = "all"
 
 
 def normalise(text: str) -> str:
@@ -137,36 +146,55 @@ def _rows(connection: duckdb.DuckDBPyConnection, sql: str) -> list[tuple]:
         return []
 
 
+def _quarters(quarters: list[str]) -> list[str] | dict[str, Any]:
+    """Every quarter covered, or the span when there are too many to list."""
+    if len(quarters) <= MAX_LISTED_QUARTERS:
+        return quarters
+    return {"from": quarters[0], "to": quarters[-1], "count": len(quarters)}
+
+
 def _coverage(connection: duckdb.DuckDBPyConnection) -> dict[tuple[str, str], dict[str, Any]]:
-    """Which dimension values each indicator actually has rows for, per country.
+    """Which dimension values each indicator actually has rows for, per country and source.
 
     This is the field that prevents the commonest silent failure: asking for an
     indicator in a quarter it does not cover and getting zero rows with no hint.
+    It is split by source because the sources cover very different ground - the
+    same indicator can be subnational for a few quarters from Naomi and national
+    for sixty years from Spectrum.
     """
     sql = f"""
-        SELECT country, indicator,
+        SELECT country, indicator, source,
                list_sort(list_distinct(list(calendar_quarter))) AS quarters,
                list_sort(list_distinct(list(sex))) AS sexes,
                list_sort(list_distinct(list(area_level))) AS levels,
-               count(DISTINCT age_group) AS age_groups
-        FROM {FACT_VIEW} GROUP BY 1, 2
+               count(DISTINCT age_group) AS age_groups,
+               list_sort(list_distinct(list(risk_group))) AS risk_groups
+        FROM {FACT_VIEW} GROUP BY 1, 2, 3 ORDER BY 3
     """  # noqa: S608 - view name is a schema constant
-    return {
-        (country, indicator): {
-            "calendar_quarter": quarters,
+    coverage: dict[tuple[str, str], dict[str, Any]] = {}
+    for country, indicator, source, quarters, sexes, levels, age_groups, risk_groups in _rows(connection, sql):
+        entry: dict[str, Any] = {
+            "calendar_quarter": _quarters(quarters),
             "sex": sexes,
             "area_level": levels,
             "age_groups": age_groups,
         }
-        for country, indicator, quarters, sexes, levels, age_groups in _rows(connection, sql)
-    }
+        # Only worth saying when it is not just the whole population.
+        if risk_groups != [WHOLE_POPULATION]:
+            entry["risk_group"] = risk_groups
+        coverage.setdefault((country, indicator), {})[source] = entry
+    return coverage
 
 
 def _indicator_entries(connection: duckdb.DuckDBPyConnection) -> list[Entry]:
     overlay = indicators()
     coverage = _coverage(connection)
     entries = []
-    sql = f"SELECT country, indicator, indicator_label, description FROM dim_indicator"  # noqa: F541
+    # One row per source that carries the indicator; they label it identically.
+    sql = """
+        SELECT country, indicator, min(indicator_label), min(description)
+        FROM dim_indicator GROUP BY 1, 2 ORDER BY 1, 2
+    """
     for country, indicator, label, description in _rows(connection, sql):
         spec = overlay.get(indicator, {})
         aliases = list(spec.get("aliases", []))
@@ -190,9 +218,13 @@ def _indicator_entries(connection: duckdb.DuckDBPyConnection) -> list[Entry]:
 
 def _area_entries(connection: duckdb.DuckDBPyConnection) -> list[Entry]:
     sql = """
+        WITH areas AS (
+            SELECT DISTINCT country, area_id, area_name, area_level, area_level_label, parent_area_id
+            FROM dim_area
+        )
         SELECT a.country, a.area_id, a.area_name, a.area_level, a.area_level_label,
                a.parent_area_id, p.area_name
-        FROM dim_area a LEFT JOIN dim_area p ON a.parent_area_id = p.area_id AND a.country = p.country
+        FROM areas a LEFT JOIN areas p ON a.parent_area_id = p.area_id AND a.country = p.country
     """
     entries = []
     for country, area_id, name, level, level_label, parent_id, parent_name in _rows(connection, sql):
@@ -220,7 +252,7 @@ def _area_entries(connection: duckdb.DuckDBPyConnection) -> list[Entry]:
 
 def _age_group_entries(connection: duckdb.DuckDBPyConnection) -> list[Entry]:
     aliases = age_aliases()
-    sql = "SELECT country, age_group, age_group_label FROM dim_age_group"
+    sql = "SELECT DISTINCT country, age_group, age_group_label FROM dim_age_group"
     return [
         Entry(
             field="age_group",
@@ -231,6 +263,37 @@ def _age_group_entries(connection: duckdb.DuckDBPyConnection) -> list[Entry]:
             terms=(age_group, label, *aliases.get(age_group, [])),
         )
         for country, age_group, label in _rows(connection, sql)
+    ]
+
+
+def _risk_group_entries(connection: duckdb.DuckDBPyConnection) -> list[Entry]:
+    """Behavioural risk groups, with where to find them.
+
+    A risk group is only in some sources and, mostly, one sex - female sex
+    workers are in SHIPP's female rows - so the entry says which, or the caller
+    queries Naomi for them and gets nothing.
+    """
+    aliases = risk_group_aliases()
+    sql = f"""
+        SELECT r.country, r.risk_group, min(r.risk_group_label),
+               list_sort(list_distinct(list(f.source))), list_sort(list_distinct(list(f.sex)))
+        FROM (SELECT DISTINCT country, risk_group, risk_group_label FROM dim_risk_group) r
+        JOIN (SELECT DISTINCT country, risk_group, source, sex FROM {FACT_VIEW}) f
+          ON f.country = r.country AND f.risk_group = r.risk_group
+        WHERE r.risk_group <> '{WHOLE_POPULATION}'
+        GROUP BY 1, 2 ORDER BY 1, 2
+    """  # noqa: S608 - view name and literal are module constants
+    return [
+        Entry(
+            field="risk_group",
+            id=risk_group,
+            label=label,
+            description=None,
+            country=country,
+            terms=(risk_group, label, *aliases.get(risk_group, [])),
+            detail={"source": sources, "sex": sexes},
+        )
+        for country, risk_group, label, sources, sexes in _rows(connection, sql)
     ]
 
 
@@ -278,6 +341,7 @@ def build_index(connection: duckdb.DuckDBPyConnection) -> list[Entry]:
         *_area_entries(connection),
         *_age_group_entries(connection),
         *_partition_entries(),
+        *_risk_group_entries(connection),
     ]
 
 
@@ -396,7 +460,7 @@ class SearchResponse(BaseModel):
     operation_id="search_hiv_metadata",
     summary="Resolve plain-language terms to the IDs accepted by get_hiv_data",
 )
-@limiter.limit(settings.search_rate_limit)
+@limiter.limit(lambda: settings.search_rate_limit)
 def search(
     request: Request,  # required by slowapi's rate-limit decorator
     index: Annotated[list[Entry], Depends(get_index)],
@@ -414,8 +478,9 @@ def search(
         Query(
             description="Restrict to these kinds of thing: 'concept' (a phrase like 'treatment gap' "
             "mapped to the indicators that encode it), 'indicator', 'area', 'age_group', "
-            "'age_partition' (a set of age groups that may safely be summed). Omit it when "
-            "unsure - that is the common case, and results say which kind they are."
+            "'age_partition' (a set of age groups that may safely be summed), 'risk_group' (a "
+            "behavioural risk group such as female sex workers). Omit it when unsure - that is "
+            "the common case, and results say which kind they are."
         ),
     ] = None,
     country: Annotated[
@@ -427,15 +492,22 @@ def search(
 ) -> SearchResponse:
     """Turn the words in a question into the IDs `get_hiv_data` accepts.
 
-    Indicator, area, age-group and concept IDs cannot be guessed: HIV prevalence
-    is `prevalence`, but the treatment gap is `untreated_plhiv_num`, Lilongwe is
-    `MWI_3_13_demo` and children are `Y000_014`. Guessing returns an empty result
-    with no explanation, so resolve terms here first.
+    Indicator, area, age-group, risk-group and concept IDs cannot be guessed: HIV
+    prevalence is `prevalence`, but the treatment gap is `untreated_plhiv_num`,
+    Lilongwe is `MWI_3_13_demo`, children are `Y000_014` and female sex workers
+    are `sexpaid12m`. Guessing returns an empty result with no explanation, so
+    resolve terms here first.
 
     A `concept` match is the most useful kind: it names the indicators that encode
     a phrase, their units, the dimension values they actually have data for, and
     the caveats that make an answer correct - for instance that a treatment gap
     ranks differently as a count than as a coverage proportion.
+
+    An indicator's `coverage` is keyed by `source` - the model the estimates come
+    from - because the sources cover different ground: `naomi` is subnational for
+    a few recent quarters, `spectrum` is national for every year, and `shipp`
+    splits adults by behavioural `risk_group`. Pass the source you want to
+    `get_hiv_data`. A `risk_group` match says which sources and sexes have it.
 
     When `ambiguous` is true the top two matches are genuinely competing
     ('Blantyre' the district and 'Blantyre City'; 'adults' as 15-49 or as 15+).

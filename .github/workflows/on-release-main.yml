@@ -60,6 +60,46 @@ jobs:
             exit 1
           fi
 
+      # The private inputs, from a separate private repo. This repo is public, and
+      # so are its Actions logs: nothing below may print the data. The deploy key
+      # and repo name live in the production environment, which only release
+      # runs can reach.
+      - name: Check out private data
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ vars.DATA_REPO }}
+          ref: ${{ vars.DATA_REPO_REF }}
+          ssh-key: ${{ secrets.DATA_REPO_DEPLOY_KEY }}
+          path: data-prep/private-data
+          persist-credentials: false
+
+      - name: Record the data version
+        run: echo "Building with ${{ vars.DATA_REPO }} at $(git -C data-prep/private-data rev-parse HEAD)"
+
+      - name: Set up R
+        uses: r-lib/actions/setup-r@v2
+        with:
+          use-public-rspm: true
+
+      # Only public packages are cached, never data.
+      - name: Cache R packages
+        uses: actions/cache@v6
+        with:
+          path: ${{ env.R_LIBS_USER }}
+          key: r-packages-${{ runner.os }}-${{ hashFiles('Makefile') }}
+
+      - name: Install R packages
+        run: make r-deps
+
+      # Output is discarded rather than shown: it names the private files and
+      # summarises their contents. Reproduce a failure locally with `make data`.
+      - name: Build the dataset
+        run: |
+          if ! make data > /dev/null 2>&1; then
+            echo "::error::Building the dataset failed. Check out the data repo into data-prep/private-data and run 'make data' locally to see why."
+            exit 1
+          fi
+
       - name: Azure login
         uses: azure/login@v3
         with:
@@ -70,10 +110,15 @@ jobs:
       - name: Log in to ACR
         run: az acr login --name ${{ vars.ACR_NAME }}
 
+      # The dataset goes in as a named context, replacing the Dockerfile's demo
+      # data stage. No build cache: its layers would hold the data, and a GitHub
+      # Actions cache can be read by other workflows in this public repo.
       - name: Build and push image
         uses: docker/build-push-action@v7
         with:
           context: .
+          build-contexts: data=data-prep/naomi-data
+          no-cache: true
           push: true
           tags: |
             ${{ vars.ACR_LOGIN_SERVER }}/hivtools-mcp:${{ github.event.release.tag_name }}
@@ -86,11 +131,24 @@ jobs:
           resourceGroup: ${{ vars.RESOURCE_GROUP }}
           imageToDeploy: ${{ vars.ACR_LOGIN_SERVER }}/hivtools-mcp:${{ github.event.release.tag_name }}
 
+      # Responses are only ever piped to grep: the log is public.
       - name: Smoke test
+        env:
+          API_TOKEN: ${{ secrets.API_TOKEN }}
         run: |
           fqdn=${{ vars.CONTAINER_APP_FQDN }}
           for _ in $(seq 1 30); do
             curl -fsS "https://$fqdn/health" && break || sleep 5
           done
           curl -fsS "https://$fqdn/version"
-          curl -fsS "https://$fqdn/data?country=MWI&limit=1" | grep -q '"total"'
+          status=$(curl -s -o /dev/null -w '%{http_code}' "https://$fqdn/data?limit=1")
+          if [ "$status" != 401 ]; then
+            echo "::error::/data answered $status without a token; it must be 401"
+            exit 1
+          fi
+          auth="Authorization: Bearer $API_TOKEN"
+          curl -fsS -H "$auth" "https://$fqdn/data?country=MWI&limit=1&columns=mean" | grep -q '"total":[1-9]'
+          for source in naomi spectrum shipp; do
+            curl -fsS -H "$auth" "https://$fqdn/data?country=TZA&source=$source&limit=1&columns=mean" | grep -q '"total":[1-9]' \
+              || { echo "::error::no TZA $source data served"; exit 1; }
+          done

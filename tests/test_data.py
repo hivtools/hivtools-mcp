@@ -16,8 +16,8 @@ ALL_COLUMNS = set(DIMENSIONS) | set(LABEL_COLUMNS) | set(MEASURES)
 
 def test_no_filters_returns_every_row_with_every_column(client: TestClient):
     body = client.get("/data").json()
-    assert body["total"] == 4
-    assert len(body["data"]) == 4
+    assert body["total"] == 8
+    assert len(body["data"]) == 8
     assert set(body["data"][0]) == ALL_COLUMNS
 
 
@@ -26,7 +26,7 @@ def test_filter_by_single_dimension(client: TestClient):
 
 
 def test_area_level_is_coerced_to_int(client: TestClient):
-    assert client.get("/data", params={"area_level": 0}).json()["total"] == 2
+    assert client.get("/data", params={"area_level": 0}).json()["total"] == 6
 
 
 def test_repeated_param_is_an_or(client: TestClient):
@@ -69,11 +69,14 @@ def test_data_response_is_cacheable(client: TestClient):
 
 def test_data_is_rate_limited(data_dir: Path, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings_module.settings, "naomi_data_dir", data_dir)
+    # The limit is read per request, so it can be lowered here rather than
+    # making hundreds of requests to trip the production one.
+    monkeypatch.setattr(settings_module.settings, "data_rate_limit", "5/minute")
     monkeypatch.setattr(limiter, "enabled", True)
     limiter.reset()
     try:
         with TestClient(app) as unthrottled_client:
-            codes = [unthrottled_client.get("/data", params={"limit": 1}).status_code for _ in range(40)]
+            codes = [unthrottled_client.get("/data", params={"limit": 1}).status_code for _ in range(10)]
     finally:
         limiter.reset()
     assert 200 in codes
@@ -93,7 +96,7 @@ def test_sig_figs_can_be_overridden_per_request(client: TestClient):
 
 def test_total_is_the_full_match_count_not_the_page(client: TestClient):
     body = client.get("/data", params={"limit": 2}).json()
-    assert body["total"] == 4
+    assert body["total"] == 8
     assert len(body["data"]) == 2
 
 
@@ -113,7 +116,7 @@ def test_filter_values_are_bound_not_interpolated(client: TestClient):
     assert body.status_code == 200
     assert body.json()["total"] == 0
     # dataset still intact and queryable
-    assert client.get("/data").json()["total"] == 4
+    assert client.get("/data").json()["total"] == 8
 
 
 def test_no_match_returns_empty(client: TestClient):
@@ -171,10 +174,10 @@ def test_meta_carries_unit_and_basis_from_the_knowledge_layer(client: TestClient
 
 
 def test_meta_carries_provenance_from_the_manifest(client: TestClient):
-    # The country's display name and the model run both come from the manifest,
-    # not from any column on the fact table.
+    # The country's display name and how its figures must be described both come
+    # from the manifest, not from any column on the fact table.
     body = client.get("/data", params={"country": "MWI"}).json()
-    assert body["meta"]["source"] == "Naomi 2.10.18 model output (mwi.zip)"
+    assert body["meta"]["source"] == {"id": "naomi", "label": "Malawi - Naomi 2.10.18 subnational estimates"}
     assert body["meta"]["country"]["label"] == "Malawi"
 
 
@@ -198,7 +201,7 @@ def test_a_dimension_constant_on_one_page_only_is_not_hoisted(client: TestClient
     """Hoisting off a partial page would mislabel every later page."""
     # Page one is entirely MWI/prevalence, but the unpaged result also holds ZWE.
     body = client.get("/data", params={"limit": 2}).json()
-    assert body["total"] == 4
+    assert body["total"] == 8
     assert [row["country"] for row in body["data"]] == ["MWI", "MWI"]
     assert "country" not in body["meta"]
     assert "indicator" not in body["meta"]
@@ -251,3 +254,68 @@ def test_unknown_age_partition_is_rejected_with_the_valid_names(client: TestClie
 def test_age_partition_and_age_group_are_mutually_exclusive(client: TestClient):
     response = client.get("/data", params={"age_partition": "child_adult", "age_group": "Y015_049"})
     assert response.status_code == 422
+
+
+# --- source and risk_group ---------------------------------------------------
+
+
+def test_one_indicator_from_two_sources_comes_back_as_two_rows(client: TestClient):
+    """Same ID, same quantity, two models: the rows differ only in source."""
+    params = {"country": "TZA", "indicator": "plhiv", "calendar_quarter": "CY2025Q4", "columns": "mean,lower"}
+    body = client.get("/data", params=params).json()
+    assert [(row["source"], row["mean"], row["lower"]) for row in body["data"]] == [
+        ("naomi", 1010.0, 900.0),
+        ("spectrum", 1000.0, None),
+    ]
+    # Both are described, since both are in the result.
+    assert body["meta"]["sources"]["spectrum"] == "Tanzania estimates 2026 - Spectrum national projection"
+    assert "source" not in body["meta"]
+
+
+def test_source_picks_one_model_and_says_how_to_describe_it(client: TestClient):
+    params = {"country": "TZA", "indicator": "plhiv", "source": "spectrum"}
+    body = client.get("/data", params=params).json()
+    assert body["total"] == 1
+    assert body["meta"]["source"] == {
+        "id": "spectrum",
+        "label": "Tanzania estimates 2026 - Spectrum national projection",
+    }
+    assert "sources" not in body["meta"]
+
+
+def test_a_source_across_countries_is_described_per_country(client: TestClient):
+    """The same model says different things about different countries' figures."""
+    body = client.get("/data", params={"source": "naomi"}).json()
+    assert body["meta"]["source"] == {"id": "naomi"}
+    assert body["meta"]["sources"]["TZA"] == {"naomi": "Tanzania estimates 2026 - Naomi subnational estimates"}
+    assert set(body["meta"]["sources"]) == {"MWI", "TZA", "ZWE"}
+
+
+def test_risk_group_filters_and_is_labelled(client: TestClient):
+    body = client.get("/data", params={"country": "TZA", "risk_group": "sexpaid12m"}).json()
+    assert body["total"] == 1
+    assert body["meta"]["risk_group"] == {"id": "sexpaid12m", "label": "Female sex workers"}
+    assert body["meta"]["source"]["id"] == "shipp"
+
+
+def test_risk_groups_vary_in_rows_with_their_labels(client: TestClient):
+    body = client.get("/data", params={"country": "TZA", "source": "shipp", "columns": "mean"}).json()
+    assert [(row["risk_group"], row["risk_group_label"]) for row in body["data"]] == [
+        ("sexpaid12m", "Female sex workers"),
+        ("msm", "Men who have sex with men"),
+    ]
+
+
+def test_search_is_rate_limited_separately(data_dir: Path, monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setattr(settings_module.settings, "naomi_data_dir", data_dir)
+    monkeypatch.setattr(settings_module.settings, "search_rate_limit", "3/minute")
+    monkeypatch.setattr(limiter, "enabled", True)
+    limiter.reset()
+    try:
+        with TestClient(app) as unthrottled_client:
+            search = [unthrottled_client.get("/search", params={"q": "x"}).status_code for _ in range(5)]
+            data = unthrottled_client.get("/data", params={"limit": 1}).status_code
+    finally:
+        limiter.reset()
+    assert search == [200, 200, 200, 429, 429]
+    assert data == 200

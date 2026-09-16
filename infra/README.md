@@ -64,8 +64,48 @@ Actions → Variables) from `terraform output`:
 | `CONTAINER_APP_NAME` | `container_app_name` |
 | `CONTAINER_APP_FQDN` | `container_app_fqdn` |
 
+The release also needs the private data and the API token. Add these to the
+**`production` environment** (Settings → Environments → production), not the
+repo, so that only release runs can read them - this repo is public:
+
+| Name | Kind | Value |
+|---|---|---|
+| `DATA_REPO` | variable | `owner/repo` of the private data repo: `hivtools/hivtools-mcp-data` |
+| `DATA_REPO_REF` | variable | Optional: branch, tag or commit of it to build from (default branch if unset) |
+| `DATA_REPO_DEPLOY_KEY` | secret | Private half of a read-only deploy key on the data repo |
+| `API_TOKEN` | secret | `terraform output -raw api_token`, for the smoke test |
+
+To make the deploy key: `ssh-keygen -t ed25519 -N "" -f data-repo-key`, add
+`data-repo-key.pub` to the data repo (Settings → Deploy keys, read-only), paste
+`data-repo-key` into `DATA_REPO_DEPLOY_KEY`, then delete both files.
+
+The data repo holds a `datasets.yaml` at its root listing each country's input
+files (format in `data-prep/raw-data/datasets.yaml`). It is checked out at
+`data-prep/private-data`, both in the release and locally.
+
 Then bump `../pyproject.toml` to the release version and cut a GitHub Release
 `vX.Y.Z` — `deploy-docs` and `deploy-azure` run.
+
+## Authentication
+
+The app requires a bearer token (see the main README). Terraform generates it
+(`random_password.api_token`) and hands it to the Container App as a secret. The
+image refuses to start without it, so **apply Terraform before releasing an image
+that requires it**. Older images ignore the extra variable, so applying first is
+always safe.
+
+Clients need the token too:
+
+- **claude.ai connector**: an organisation admin sets a request header
+  `Authorization: Bearer <token>` on the custom connector (static request headers
+  are a beta feature of custom connectors).
+- **GitHub**: the `API_TOKEN` environment secret above.
+
+To rotate it: `terraform apply -replace=random_password.api_token`, then update
+both of the above. Requests with the old token fail from the moment the new
+revision is live.
+
+The token is in Terraform state, which is local and gitignored - keep it that way.
 
 ## Setting up as a new deployer
 

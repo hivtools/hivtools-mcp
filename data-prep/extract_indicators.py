@@ -6,46 +6,65 @@
 #     "pyyaml>=6",
 # ]
 # ///
-"""Build a Parquet dataset from a directory of Naomi model output zips.
+"""Build the Parquet dataset from the model outputs listed in datasets.yaml files.
 
-For every ``*.zip`` in the given directory this reads the model output straight
-from the archive (no need to unzip first) and writes three things:
+Each ``datasets.yaml`` names, per country, the files to build from (see
+``raw-data/datasets.yaml`` for the format). Three sources are understood:
 
-**A fact table** (``facts/``) - ``indicators.csv`` with the label and sort-order
-columns joined on. Denormalising the labels costs about 0.1% on disk, because
-Parquet dictionary-encodes the repeated strings, and it saves a join on every
-request. Sort orders come along so age bands and areas can be ordered sensibly
-with a plain ``ORDER BY`` rather than a join.
+- **naomi** (required): the Naomi model output zip. Read here, straight from the
+  archive.
+- **spectrum** (optional): the Spectrum ``.pjnz`` - the national projection,
+  one value a year.
+- **shipp** (optional): the SHIPP workbook - Naomi's adults broken down by
+  behavioural risk group.
+
+Spectrum and SHIPP are read by ``extract_spectrum_shipp.R``, which this script
+runs for any country that lists them: reading a PJNZ needs SpectrumUtils, which
+is R only. Only countries that list one need R installed.
+
+For every source this writes:
+
+**A fact table** (``facts/``) - one row per estimate, with the label and
+sort-order columns joined on. Denormalising the labels costs about 0.1% on disk,
+because Parquet dictionary-encodes the repeated strings, and it saves a join on
+every request. Sort orders come along so age bands and areas can be ordered
+sensibly with a plain ``ORDER BY`` rather than a join. Every row has a
+``risk_group``; for Naomi and Spectrum it is always ``all``.
 
 **Dimension tables** (``dim_area/``, ``dim_age_group/``, ``dim_period/``,
-``dim_indicator/``) - the zip's ``meta_*.csv`` files as-is. These are the source
-of truth for labels, and they are what search scans (70 area rows, not 400,000)
-and what the API reads when a query matches no rows and it has to explain why.
+``dim_indicator/``, ``dim_risk_group/``) - for Naomi, the zip's ``meta_*.csv``
+files as-is. These are the source of truth for labels, and they are what search
+scans (70 area rows, not 400,000) and what the API reads when a query matches no
+rows and it has to explain why. Spectrum and SHIPP reuse Naomi's areas and age
+groups, and add only the periods, indicators and risk groups they bring.
 
-**A manifest** (``manifest.json``) - just enough provenance to identify the
-source: the Naomi version, the zip's name and SHA-256, and whether this is
-demonstration data. The zip's ``info/`` directory holds far more (67 package
-versions, 40-odd fit options, the input files and their checksums); none of it is
-read downstream, and the hash identifies the archive it can all be recovered
-from, so copying it into the manifest would only create a second thing to keep in
-step. Options and packages are still *read* here - they are how the Naomi version
-and the demo status are worked out - they are just not stored.
+**A manifest** (``manifest.json``) - per country, how its figures should be
+described and just enough provenance to identify each source: the file's name and
+SHA-256, the Naomi version, and whether this is demonstration data. The zip's
+``info/`` directory holds far more (67 package versions, 40-odd fit options, the
+input files and their checksums); none of it is read downstream, and the hash
+identifies the archive it can all be recovered from, so copying it into the
+manifest would only create a second thing to keep in step. Options and packages
+are still *read* here - they are how the Naomi version and the demo status are
+worked out - they are just not stored.
 
 Everything is partitioned by ``country`` (the ISO3 code from the national,
-area_level 0, row), so re-running replaces one country and leaves the rest:
+area_level 0, row) and ``source``, so re-running replaces one country's source
+and leaves the rest:
 
     naomi-data/
       manifest.json
-      facts/country=MWI/*.parquet
-      dim_area/country=MWI/*.parquet
+      facts/country=MWI/source=naomi/*.parquet
+      facts/country=TZA/source=spectrum/*.parquet
+      dim_area/country=MWI/source=naomi/*.parquet
       ...
 
 Usage:
-  extract_indicators.py <dir> [--out-dir=<path>]
+  extract_indicators.py <datasets>... [--out-dir=<path>]
   extract_indicators.py (-h | --help)
 
 Arguments:
-  <dir>              Directory of Naomi output zips, each containing indicators.csv.
+  <datasets>         datasets.yaml files listing the countries to build.
 
 Options:
   -h --help          Show this help and exit.
@@ -58,6 +77,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
 import zipfile
 from datetime import datetime, timezone
@@ -70,6 +90,9 @@ import yaml
 from docopt import docopt
 
 INDICATORS = "indicators.csv"
+SOURCE = "naomi"
+R_EXTRACTOR = Path(__file__).parent / "extract_spectrum_shipp.R"
+R_SOURCES = ("spectrum", "shipp")
 
 FACT_COLUMNS = [
     "area_level",
@@ -85,6 +108,14 @@ FACT_COLUMNS = [
     "lower",
     "upper",
 ]
+
+# Naomi estimates are for the whole population. SHIPP splits it by behavioural
+# risk group, so every row needs one; this is the total SHIPP's groups add up to.
+# extract_spectrum_shipp.R writes the same row.
+ALL_RISK_GROUPS = pl.DataFrame(
+    {"risk_group": ["all"], "risk_group_label": ["All"], "risk_group_sort_order": [0]},
+    schema={"risk_group": pl.String, "risk_group_label": pl.String, "risk_group_sort_order": pl.Int64},
+)
 
 # Each dimension table, and the columns joined onto the fact table from it. The
 # join columns are deliberately few: enough to label a row and order it, no more.
@@ -146,7 +177,7 @@ def build_facts(indicators: pl.DataFrame, dims: dict[str, pl.DataFrame]) -> pl.D
         key = spec["key"]
         lookup = dims[name].select([key, *spec["join"]])
         facts = facts.join(lookup, on=key, how="left")
-    return facts
+    return facts.join(ALL_RISK_GROUPS, how="cross")
 
 
 def national_row(indicators: pl.DataFrame, zip_path: Path) -> tuple[str, str]:
@@ -192,7 +223,7 @@ def fit_options(archive: zipfile.ZipFile) -> dict[str, Any]:
 
 
 def file_digest(path: Path) -> str:
-    """SHA-256 of the source archive.
+    """SHA-256 of a source file.
 
     This is what makes the rest of info/ droppable: anything not stored here -
     package versions, fit options, input checksums - is recoverable from the
@@ -206,38 +237,62 @@ def file_digest(path: Path) -> str:
     return digest.hexdigest()
 
 
+SOURCE_DESCRIPTIONS = {
+    "naomi": "Naomi {version} subnational estimates",
+    "spectrum": "Spectrum national projection",
+    "shipp": "SHIPP estimates by behavioural risk group",
+}
+
+
+def describe(source: str, label: str, is_demo: bool, version: str | None = None) -> str:
+    """How a source's figures should be described, which is what the API serves as ``source``."""
+    what = SOURCE_DESCRIPTIONS[source].format(version=version or "").replace("  ", " ")
+    text = f"{label} - {what}"
+    return f"{text} - DEMONSTRATION data, not official estimates" if is_demo else text
+
+
+def source_entry(path: Path, description: str, **extra: Any) -> dict[str, Any]:
+    return {"description": description, "file": path.name, "sha256": file_digest(path), **extra}
+
+
 def build_manifest(
     archive: zipfile.ZipFile,
-    zip_path: Path,
+    inputs: dict[str, Path],
     facts: pl.DataFrame,
     country_label: str,
+    label: str | None,
 ) -> dict[str, Any]:
-    """Provenance for one country: what produced the data, and whether it is real."""
+    """Provenance for one country: what produced each source, and whether it is real."""
     version = naomi_version(archive)
     is_demo = bool(demo_signals(facts, country_label, fit_options(archive)))
+    label = label or country_label
 
-    origin = f"Naomi {version} model output ({zip_path.name})" if version else f"Naomi model output ({zip_path.name})"
-    source = f"{origin} - DEMONSTRATION data, not official estimates" if is_demo else origin
+    sources = {
+        "naomi": source_entry(inputs["naomi"], describe("naomi", label, is_demo, version), naomi_version=version)
+    }
+    for source in R_SOURCES:
+        if source in inputs:
+            sources[source] = source_entry(inputs[source], describe(source, label, is_demo))
 
     return {
         "country_label": country_label,
-        "source": source,
+        "label": label,
         "is_demo": is_demo,
-        "naomi_version": version,
-        "source_file": zip_path.name,
-        "source_sha256": file_digest(zip_path),
         "extracted_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        "sources": sources,
     }
 
 
 def write_partition(frame: pl.DataFrame, table: str, country: str, out_dir: Path) -> None:
-    """Replace this country's partition of one table; other countries are untouched."""
+    """Replace this country's Naomi partition of one table; everything else is untouched."""
     root = out_dir / table
-    partition = root / f"country={country}"
+    partition = root / f"country={country}" / f"source={SOURCE}"
     if partition.exists():
         shutil.rmtree(partition)
     root.mkdir(parents=True, exist_ok=True)
-    frame.with_columns(pl.lit(country).alias("country")).write_parquet(root, partition_by="country")
+    frame.with_columns(pl.lit(country).alias("country"), pl.lit(SOURCE).alias("source")).write_parquet(
+        root, partition_by=["country", "source"]
+    )
 
 
 def update_manifest(manifest: dict[str, Any], country: str, out_dir: Path) -> None:
@@ -252,7 +307,18 @@ def update_manifest(manifest: dict[str, Any], country: str, out_dir: Path) -> No
     path.write_text(json.dumps(document, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
 
-def process(zip_path: Path, out_dir: Path) -> None:
+def run_r_extractor(country: str, inputs: dict[str, Path], out_dir: Path) -> None:
+    """Write the Spectrum and SHIPP partitions for one country."""
+    rscript = shutil.which("Rscript")
+    if rscript is None:
+        sys.exit(f"error: {country} lists {[s for s in R_SOURCES if s in inputs]}, which need Rscript on the PATH")
+    args = [rscript, str(R_EXTRACTOR), f"--country={country}", f"--naomi={inputs['naomi']}", f"--out-dir={out_dir}"]
+    args += [f"--{source}={inputs[source]}" for source in R_SOURCES if source in inputs]
+    subprocess.run(args, check=True)  # noqa: S603 - arguments come from the datasets file, not a request
+
+
+def process(country: str, inputs: dict[str, Path], label: str | None, out_dir: Path) -> None:
+    zip_path = inputs["naomi"]
     with zipfile.ZipFile(zip_path) as archive:
         raw = read_member(archive, INDICATORS)
         if raw is None:
@@ -261,32 +327,55 @@ def process(zip_path: Path, out_dir: Path) -> None:
 
         dims = {name: read_meta(archive, spec["member"], spec["integers"]) for name, spec in DIMENSIONS.items()}
         facts = build_facts(indicators, dims)
-        country, country_label = national_row(facts, zip_path)
-        manifest = build_manifest(archive, zip_path, facts, country_label)
+        found, country_label = national_row(facts, zip_path)
+        if found != country:
+            sys.exit(f"error: {zip_path} is listed under {country} but its national row is {found}")
+        manifest = build_manifest(archive, inputs, facts, country_label, label)
 
     write_partition(facts, "facts", country, out_dir)
-    for name, frame in dims.items():
+    for name, frame in {**dims, "dim_risk_group": ALL_RISK_GROUPS}.items():
         write_partition(frame, name, country, out_dir)
+    status = " [DEMO data]" if manifest["is_demo"] else ""
+    print(f"{zip_path.name}: {facts.height:,} naomi rows for {country}{status} -> {out_dir}", flush=True)
+
+    if any(source in inputs for source in R_SOURCES):
+        run_r_extractor(country, inputs, out_dir)
     update_manifest(manifest, country, out_dir)
 
-    status = " [DEMO data]" if manifest["is_demo"] else ""
-    print(f"{zip_path.name}: {facts.height:,} rows for {country}{status} -> {out_dir}")
+
+def read_datasets(path: Path) -> dict[str, dict[str, Any]]:
+    """The countries a datasets.yaml lists, with input paths resolved against it."""
+    if not path.is_file():
+        sys.exit(f"error: not a file: {path}")
+    document = yaml.safe_load(path.read_text(encoding="utf-8")) or {}
+    countries = {}
+    for country, spec in document.items():
+        if "naomi" not in spec:
+            sys.exit(f"error: {path}: {country} has no naomi output; every country needs one")
+        unknown = set(spec) - {"label", "naomi", *R_SOURCES}
+        if unknown:
+            sys.exit(f"error: {path}: {country} has unknown keys {sorted(unknown)}")
+        inputs = {source: path.parent / spec[source] for source in ("naomi", *R_SOURCES) if source in spec}
+        missing = [str(file) for file in inputs.values() if not file.is_file()]
+        if missing:
+            sys.exit(f"error: {path}: {country} lists files that do not exist: {missing}")
+        countries[str(country)] = {"inputs": inputs, "label": spec.get("label")}
+    return countries
 
 
 def main() -> None:
     args = docopt(__doc__)
-
-    src = Path(args["<dir>"])
-    if not src.is_dir():
-        sys.exit(f"error: not a directory: {src}")
-    zips = sorted(src.glob("*.zip"))
-    if not zips:
-        sys.exit(f"error: no .zip files in {src}")
-
     out_dir = Path(args["--out-dir"]) if args["--out-dir"] else Path(__file__).parent / "naomi-data"
 
-    for zip_path in zips:
-        process(zip_path, out_dir)
+    countries: dict[str, dict[str, Any]] = {}
+    for datasets in args["<datasets>"]:
+        for country, spec in read_datasets(Path(datasets)).items():
+            if country in countries:
+                sys.exit(f"error: {country} is listed in more than one datasets file")
+            countries[country] = spec
+
+    for country, spec in countries.items():
+        process(country, spec["inputs"], spec["label"], out_dir)
 
 
 if __name__ == "__main__":
