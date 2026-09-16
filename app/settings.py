@@ -1,5 +1,6 @@
 from pathlib import Path
 
+from pydantic import SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -10,6 +11,12 @@ class Settings(BaseSettings):
 
     # Root of the Hive-partitioned Parquet dataset produced by data-prep/extract_indicators.py.
     naomi_data_dir: Path = Path("data-prep/naomi-data")
+
+    # Bearer token every request must carry, bar the health and version endpoints
+    # (see app.auth). Unset leaves the API open, which is for local development
+    # only: the container image sets require_auth, which refuses to start without it.
+    api_token: SecretStr | None = None
+    require_auth: bool = False
 
     # Per-query DuckDB thread cap. None leaves DuckDB's default (one thread per core);
     # set a small number to avoid oversubscribing cores under concurrent API load.
@@ -25,12 +32,15 @@ class Settings(BaseSettings):
     max_rows: int = 5_000
     default_rows: int = 1_000
 
-    # Per-IP rate limit for /data (slowapi syntax, e.g. "30/minute"). Disable it
-    # wholesale with rate_limit_enabled=False (the test suite does).
-    data_rate_limit: str = "30/minute"
+    # Per-IP rate limit for /data (slowapi syntax, e.g. "300/minute"). Disable it
+    # wholesale with rate_limit_enabled=False (the test suite does). Every
+    # claude.ai user arrives from a handful of Anthropic addresses, so this is
+    # effectively shared by all of them: a guard on runaway cost, with the bearer
+    # token keeping everyone else out.
+    data_rate_limit: str = "300/minute"
     # Search is cheap (an in-memory scan of a few hundred rows) and an agent makes
     # several calls per question, so it gets a looser limit than /data.
-    search_rate_limit: str = "120/minute"
+    search_rate_limit: str = "600/minute"
     rate_limit_enabled: bool = True
 
     # Cache-Control max-age (seconds) sent with /data responses. The dataset only
