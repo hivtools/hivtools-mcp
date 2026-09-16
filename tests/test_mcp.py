@@ -14,6 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from loguru import logger
 
+from app.knowledge.loader import instructions
 from app.settings import settings
 
 MCP_HEADERS = {"Accept": "application/json, text/event-stream"}
@@ -111,6 +112,23 @@ def test_data_tool_exposes_every_filter(client: TestClient, mcp_session: str):
         "sig_figs",
         "user_question",
     }
+
+
+def test_data_tool_tells_the_model_to_resolve_ids_with_search(client: TestClient, mcp_session: str):
+    # claude.ai drops the server `instructions`, so the search-first workflow only
+    # reaches the model if it is in get_hiv_data's own description.
+    tools = {tool["name"]: tool for tool in _rpc(client, mcp_session, "tools/list")["tools"]}
+    data_tool = tools["get_hiv_data"]
+    assert "search_hiv_metadata" in data_tool["description"]
+    for name in ("indicator", "area_id", "age_group", "age_partition", "calendar_quarter"):
+        assert "search_hiv_metadata" in data_tool["inputSchema"]["properties"][name]["description"], name
+
+
+def test_instructions_only_name_real_tools(client: TestClient, mcp_session: str):
+    tool_names = {tool["name"] for tool in _rpc(client, mcp_session, "tools/list")["tools"]}
+    mentioned = set(re.findall(r"`((?:get|search)\w*)`", instructions()))
+    assert mentioned
+    assert mentioned <= tool_names, f"instructions name tools that do not exist: {sorted(mentioned - tool_names)}"
 
 
 def test_tool_call_is_logged_with_what_links_it_to_a_conversation(

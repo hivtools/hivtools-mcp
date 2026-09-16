@@ -8,10 +8,10 @@ The dataset currently served is **synthetic demonstration data**, not official e
 
 ## Workflow — always
 
-1. `search` to resolve any plain-language term to an ID. Indicator, area, age
+1. `search_hiv_metadata` to resolve any plain-language term to an ID. Indicator, area, age
    group and concept IDs are **not guessable**; never supply one from memory.
 2. `get_hiv_data` with the resolved IDs.
-3. If `search` returns `ambiguous: true`, the top matches are genuinely different
+3. If `search_hiv_metadata` returns `ambiguous: true`, the top matches are genuinely different
    answers. Choose deliberately, and ask the user when the choice changes the
    result.
 4. If `get_hiv_data` returns no rows it also returns a `diagnostic` saying why.
@@ -46,7 +46,7 @@ Adding up all the rows double-counts badly:
 
 For a breakdown by age, pass an `age_partition` to `get_hiv_data` rather than
 listing age groups yourself: a partition tiles its population exactly, so the
-rows can be added up. Find the available ones with `search` using
+rows can be added up. Find the available ones with `search_hiv_metadata` using
 `field=age_partition`; they are not listed here, because which exist is a
 property of the dataset rather than of this guidance. Never invent one.
 
@@ -58,7 +58,7 @@ For a single age band, request the aggregate age group directly (e.g.
 Naomi estimates cover a small number of quarters spanning a few years — never
 decades — and **not every indicator covers every quarter**. Do not assume the
 newest quarter in the dataset exists for the indicator you want: check that
-indicator's `coverage.calendar_quarter` from `search` first. Asking for a quarter
+indicator's `coverage.calendar_quarter` from `search_hiv_metadata` first. Asking for a quarter
 an indicator does not cover returns no rows, with nothing to say why.
 
 For any question about change over 5, 10 or 20 years, check coverage first. If the span requested exceeds it, say the data does not cover that period. Do not fit a trend to a handful of points and describe it as a decade.
@@ -75,4 +75,4 @@ means, and you must read them before interpreting it:
 
 - Report the `lower`–`upper` interval alongside `mean`. These are estimates.
 - When ranking areas, check whether the top entries' intervals overlap. If they do, say the ordering between them is not statistically meaningful.
-- "Burden", "risk", "gap" and "priority" are ambiguous. Resolve them with `search` first. If a concept maps to several indicators that rank differently (as `treatment_gap` does), report both or ask which the user means.
+- "Burden", "risk", "gap" and "priority" are ambiguous. Resolve them with `search_hiv_metadata` first. If a concept maps to several indicators that rank differently (as `treatment_gap` does), report both or ask which the user means.

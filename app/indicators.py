@@ -283,8 +283,8 @@ def get_data(
         list[str] | None,
         Query(
             description="Specific area code within `area_level`, e.g. 'MWI' for the national area or "
-            "'MWI_1_1_demo' for a level-1 subdivision. Matches the area_id used in Naomi model output; "
-            "there is no fixed list, so discover them by querying a country with no area_id filter."
+            "'MWI_1_1_demo' for a level-1 subdivision. Not guessable from an area's name: resolve "
+            "names with `search_hiv_metadata`, which also tells same-named areas apart."
         ),
     ] = None,
     sex: Annotated[
@@ -293,20 +293,25 @@ def get_data(
     ] = None,
     age_group: Annotated[
         list[str] | None,
-        Query(description="Age band as 'Y<low>_<high>', e.g. 'Y015_049' for ages 15-49 or 'Y000_999' for all ages."),
+        Query(
+            description="Age band as 'Y<low>_<high>', e.g. 'Y015_049' for ages 15-49 or 'Y000_999' for all "
+            "ages. Resolve phrases like 'children' or 'adults' with `search_hiv_metadata`."
+        ),
     ] = None,
     calendar_quarter: Annotated[
         list[str] | None,
-        Query(description="Estimate quarter as 'CY<year>Q<quarter>', e.g. 'CY2024Q3' for Q3 2024."),
+        Query(
+            description="Estimate quarter as 'CY<year>Q<quarter>', e.g. 'CY2024Q3' for Q3 2024. Not every "
+            "indicator covers every quarter; check the indicator's coverage from `search_hiv_metadata`."
+        ),
     ] = None,
     indicator: Annotated[
         list[str] | None,
         Query(
-            description="Which modelled quantity to return, e.g. 'prevalence' (HIV prevalence), "
-            "'incidence' (new infections), 'art_coverage' (proportion on ART), 'art_current' "
-            "(number currently on ART). The full set varies by model run and isn't enumerable here - "
-            "call with no `indicator` filter and inspect the `indicator` column of the response to "
-            "see what's available."
+            description="Which modelled quantity to return, e.g. 'prevalence' or 'art_coverage'. Most IDs "
+            "are not guessable from a plain-language name (the treatment gap is 'untreated_plhiv_num'), "
+            "so resolve them with `search_hiv_metadata`, which also returns each indicator's unit and "
+            "the quarters it covers."
         ),
     ] = None,
     age_partition: Annotated[
@@ -315,7 +320,7 @@ def get_data(
             description="Name of an age-group set that tiles a population without overlapping, e.g. "
             "'five_year_bands'. Expands to that set's age groups, so a breakdown by age can be "
             "requested without enumerating codes or risking an overlapping selection. Find the "
-            "available names with search (field='age_partition'). Cannot be combined with `age_group`."
+            "available names with `search_hiv_metadata` (field='age_partition'). Cannot be combined with `age_group`."
         ),
     ] = None,
     columns: Annotated[
@@ -342,6 +347,11 @@ def get_data(
     user_question: UserQuestion = None,  # logged by the MCP layer, unused here
 ) -> DataResponse:
     """Filtered rows from the Naomi HIV model's indicator estimates.
+
+    Call `search_hiv_metadata` first to resolve every indicator, area, age group
+    and age partition in the user's question to an ID. IDs are not guessable (the
+    treatment gap is `untreated_plhiv_num`, Lilongwe is `MWI_3_13_demo`), a wrong
+    one returns no rows, and search also says which quarters each indicator covers.
 
     Each row is one modelled estimate for a unique combination of the dimensions
     (country, area_level, area_id, sex, age_group, calendar_quarter, indicator);
