@@ -8,7 +8,17 @@ assertions here are about *which* entry wins and how much detail rides with it.
 import pytest
 from fastapi.testclient import TestClient
 
-from app.search import normalise, score_term, tokens
+from app.knowledge.loader import age_aliases, concepts, indicators
+from app.main import app
+from app.search import normalise, score_term, search_one, tokens
+
+
+def alias_owners() -> list[tuple[str, str, str]]:
+    """(alias, field, owner id) for every hand-authored alias in the knowledge files."""
+    cases = [(a, "concept", name) for name, c in concepts().items() for a in c["aliases"]]
+    cases += [(a, "indicator", i) for i, s in indicators().items() for a in s.get("aliases", [])]
+    cases += [(a, "age_group", code) for code, aliases in age_aliases().items() for a in aliases]
+    return cases
 
 
 def first(client: TestClient, term: str, **params) -> dict:
@@ -64,6 +74,41 @@ def test_no_match_returns_an_empty_result_not_an_error(client: TestClient):
     body = first(client, "quantum chromodynamics")
     assert body["results"] == []
     assert body["ambiguous"] is False
+
+
+def test_every_alias_surfaces_its_own_entry(client: TestClient):
+    """The whole point of the alias files is that these words resolve.
+
+    Checked in-process rather than over HTTP: there are a couple of hundred, and
+    the endpoint is rate limited. Top three rather than top one, because an alias
+    may legitimately be shared - "treatment gap" names both a concept and the
+    indicator behind it, and both should come back.
+    """
+    assert client is not None  # the fixture builds the index during lifespan
+    index = app.state.search_index
+    known = {(entry.field, entry.id) for entry in index}
+    misses = []
+    for alias, field, owner in alias_owners():
+        if (field, owner) not in known:
+            continue  # the fixture carries a subset of the real dataset
+        # Unscoped: the fixture splits entries across two countries, and country
+        # scoping has its own test. This one is about the alias reaching the index.
+        hits = search_one(alias, index, None, None, 3)["results"]
+        if not any(hit["field"] == field and hit["id"] == owner for hit in hits):
+            misses.append((alias, f"{field}:{owner}", [f"{h['field']}:{h['id']}" for h in hits]))
+    assert not misses, f"aliases that do not surface their own entry: {misses}"
+
+
+def test_related_concepts_come_back_named_not_as_bare_ids(client: TestClient):
+    """An id alone would cost another search just to learn what it refers to."""
+    related = first(client, "treatment gap")["results"][0]["related"]
+    assert {"id": "treatment_coverage", "label": "ART treatment coverage"} in related
+
+
+def test_aliases_are_matcher_input_and_never_returned(client: TestClient):
+    """They exist to be matched against, not read: ten per concept would be waste."""
+    for hit in first(client, "treatment gap")["results"]:
+        assert "aliases" not in hit
 
 
 # --- detail: fat top hit, thin remainder ------------------------------------

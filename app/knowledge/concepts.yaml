@@ -316,33 +316,6 @@ epidemic_size:
   notes: For a national total use area_level=0; do not sum districts and levels together.
   related: [hiv_burden]
 
-prevalence_concept:
-  label: HIV prevalence
-  aliases:
-    - prevalence
-    - HIV prevalence
-    - prevalence rate
-    - infection rate
-    - percentage with HIV
-    - proportion with HIV
-  what_it_measures: The proportion of the population living with HIV.
-  indicators:
-    - id: prevalence
-      role: primary
-      note: Proportion 0-1. 0.108 means 10.8%.
-    - id: plhiv
-      role: secondary
-    - id: population
-      role: denominator
-  default_disaggregation:
-    age_group: Y015_049
-    sex: both
-  notes: >-
-    Adult prevalence is conventionally reported for ages 15-49 (Y015_049). Do
-    not confuse prevalence (stock of existing infections) with incidence (flow of
-    new infections).
-  related: [hiv_burden, epidemic_size]
-
 antenatal_care:
   label: Antenatal care (ANC)
   aliases:

@@ -318,6 +318,10 @@ def _full(entry: Entry, score: float, index: Sequence[Entry], country: str | Non
         return {**body, **{key: value for key, value in entry.detail.items() if value is not None}}
 
     concept = dict(entry.detail)
+    # Bare ids would force another search just to see what they are.
+    siblings = {item.id: item.label for item in index if item.field == "concept"}
+    if concept.get("related"):
+        concept["related"] = [{"id": name, "label": siblings[name]} for name in concept["related"] if name in siblings]
     resolved = [
         {
             **_indicator_detail(Entry(field="indicator", id=item["id"], label=item["id"]), index, country),

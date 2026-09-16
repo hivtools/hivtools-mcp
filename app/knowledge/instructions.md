@@ -25,7 +25,7 @@ Each match says which `field` it is, and that determines what to do with it:
 
 | `field` | What to do |
 |---|---|
-| `concept` | The most useful kind. Use the indicators it lists, pass their `id`s to `get_hiv_data`, and follow its `notes` — that is where the reason an answer is right or wrong lives. Check each indicator's `coverage` before querying. If `answerable` is `false`, say the data cannot answer it. |
+| `concept` | The most useful kind. Use the indicators it lists, pass their `id`s to `get_hiv_data`, and follow its `notes` — that is where the reason an answer is right or wrong lives. Check each indicator's `coverage` before querying. When the user did not say which ages or sexes they meant, use `default_disaggregation` rather than querying every value: it is the convention for that concept, and asking for everything returns hundreds of overlapping rows. `related` names neighbouring concepts — follow one when the match is close but not what was asked. If `answerable` is `false`, say the data cannot answer it. |
 | `indicator` | Pass the `id` as `indicator`. Read its `unit` and `basis`. |
 | `area` | Pass the `id` as `area_id`. `area_level` distinguishes same-named areas. |
 | `age_group` | Pass the `id` as `age_group`. |
