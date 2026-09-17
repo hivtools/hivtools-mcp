@@ -1,4 +1,4 @@
-"""Tests for the bearer token that guards the data.
+"""Tests for the token that guards the data.
 
 The data is not all public, so what matters is that nothing that serves it -
 the API routes or the MCP tools built from them - answers without the token,
@@ -18,7 +18,7 @@ from app.ratelimit import limiter
 from tests.test_mcp import MCP_HEADERS, _sse_json
 
 TOKEN = "correct-horse-battery-staple"  # noqa: S105 - a test fixture, not a credential
-AUTH = {"Authorization": f"Bearer {TOKEN}"}
+API_KEY = {"X-API-Key": TOKEN}
 
 
 @pytest.fixture
@@ -51,21 +51,22 @@ def _initialize(client: TestClient, headers: dict[str, str]):
 def test_data_routes_need_the_token(guarded: TestClient, path: str):
     response = guarded.get(path)
     assert response.status_code == 401
-    assert response.headers["www-authenticate"] == "Bearer"
-    assert guarded.get(path, headers=AUTH).status_code == 200
+    assert response.headers["www-authenticate"] == 'ApiKey header="X-API-Key"'
+    assert guarded.get(path, headers=API_KEY).status_code == 200
 
 
 @pytest.mark.parametrize(
-    "header",
-    [f"Bearer {TOKEN}x", f"Basic {TOKEN}", TOKEN, "Bearer "],
-    ids=["wrong token", "wrong scheme", "no scheme", "empty"],
+    "headers",
+    [
+        {"X-API-Key": f"{TOKEN}x"},
+        {"X-API-Key": f"Bearer {TOKEN}"},
+        {"X-API-Key": ""},
+        {"Authorization": f"Bearer {TOKEN}"},
+    ],
+    ids=["wrong token", "with a scheme", "empty", "as a bearer token"],
 )
-def test_anything_but_the_token_is_refused(guarded: TestClient, header: str):
-    assert guarded.get("/data", headers={"Authorization": header}).status_code == 401
-
-
-def test_the_scheme_is_case_insensitive(guarded: TestClient):
-    assert guarded.get("/data", headers={"Authorization": f"bearer {TOKEN}"}).status_code == 200
+def test_anything_but_the_token_is_refused(guarded: TestClient, headers: dict[str, str]):
+    assert guarded.get("/data", headers=headers).status_code == 401
 
 
 @pytest.mark.parametrize("path", ["/", "/version", "/favicon.ico", "/health", "/health/ready", "/openapi.json"])
@@ -79,11 +80,10 @@ def test_mcp_needs_the_token(guarded: TestClient):
 
 
 def test_mcp_tools_still_reach_the_api_with_the_token(guarded: TestClient):
-    """The tools call the API in-process, and fastmcp drops the caller's
-    Authorization header on the way. Without the internal token those calls
-    would be refused, and every tool call would fail with a 401 inside it."""
-    response = _initialize(guarded, AUTH)
-    session = {**MCP_HEADERS, **AUTH, "mcp-session-id": response.headers["mcp-session-id"]}
+    """The tools call the API in-process, so those calls have to get past the
+    token check too, or every tool call would fail with a 401 inside it."""
+    response = _initialize(guarded, API_KEY)
+    session = {**MCP_HEADERS, **API_KEY, "mcp-session-id": response.headers["mcp-session-id"]}
     guarded.post("/mcp", json={"jsonrpc": "2.0", "method": "notifications/initialized"}, headers=session)
     call = guarded.post(
         "/mcp",
@@ -117,4 +117,4 @@ def test_requiring_auth_without_a_token_refuses_to_start(data_dir: Path, monkeyp
 def test_requiring_auth_with_a_token_starts(guarded: TestClient, monkeypatch: pytest.MonkeyPatch):
     monkeypatch.setattr(settings_module.settings, "require_auth", True)
     with TestClient(app) as client:
-        assert client.get("/data", headers=AUTH).status_code == 200
+        assert client.get("/data", headers=API_KEY).status_code == 200

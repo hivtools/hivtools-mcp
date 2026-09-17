@@ -36,7 +36,7 @@ COPY app /code/app
 COPY --from=data / /code/data
 ENV HIVTOOLS_MCP_NAOMI_DATA_DIR=/code/data
 
-# The dataset may not be public, so the image refuses to start without a bearer
+# The dataset may not be public, so the image refuses to start without an API
 # token (HIVTOOLS_MCP_API_TOKEN) rather than serving it to anyone.
 ENV HIVTOOLS_MCP_REQUIRE_AUTH=true
 

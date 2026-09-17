@@ -139,15 +139,16 @@ curl "http://127.0.0.1:8000/data?indicator=art_coverage&country=MWI,ZWE&sex=fema
 curl "http://127.0.0.1:8000/data?source=spectrum&indicator=plhiv&country=TZA&sex=both&age_group=Y000_999&columns=mean"
 
 # Female sex workers by district, from SHIPP (with auth on)
-curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8000/data?source=shipp&risk_group=sexpaid12m&indicator=population&country=TZA&area_level=4&sex=female&age_group=Y015_049"
+curl -H "X-API-Key: $TOKEN" "http://127.0.0.1:8000/data?source=shipp&risk_group=sexpaid12m&indicator=population&country=TZA&area_level=4&sex=female&age_group=Y015_049"
 ```
 
 ## Authentication
 
-When `HIVTOOLS_MCP_API_TOKEN` is set, every request needs
-`Authorization: Bearer <token>` - `/data`, `/search` and `/mcp` alike - and gets a
-`401` without it. `/`, `/version`, `/health`, `/health/ready` and the OpenAPI
-schema and docs stay open. Locally the token is unset, so the API is open.
+When `HIVTOOLS_MCP_API_TOKEN` is set, every request needs the header
+`X-API-Key: <token>` - `/data`, `/search` and `/mcp` alike - and gets a `401`
+without it. `/`, `/version`, `/favicon.ico`, `/health`, `/health/ready` and the
+OpenAPI schema and docs stay open. Locally the token is unset, so the API is
+open.
 
 In production the token comes from Terraform
 (`terraform output -raw api_token`), and the claude.ai connector sends it as a
@@ -167,7 +168,7 @@ defined in
 | Variable | Default | Purpose |
 | --- | --- | --- |
 | `HIVTOOLS_MCP_NAOMI_DATA_DIR` | `data-prep/naomi-data` | Root of the Parquet dataset to serve. |
-| `HIVTOOLS_MCP_API_TOKEN` | unset (open) | Bearer token required on every data request. See [Authentication](#authentication). |
+| `HIVTOOLS_MCP_API_TOKEN` | unset (open) | Token required on every data request. See [Authentication](#authentication). |
 | `HIVTOOLS_MCP_REQUIRE_AUTH` | `false` (`true` in the image) | Refuse to start without `HIVTOOLS_MCP_API_TOKEN`. |
 | `HIVTOOLS_MCP_SEARCH_RATE_LIMIT` | `600/minute` | Per-IP limit on `/search`; looser than `/data` since an agent makes several lookups per question. |
 | `HIVTOOLS_MCP_DUCKDB_THREADS` | unset (one per core) | Caps threads per query; lower it if many concurrent requests oversubscribe the CPU. |

@@ -124,7 +124,7 @@ records.
 
 ## Authentication
 
-The app requires a bearer token (see the main README). Terraform generates it
+The app requires an API token (see the main README). Terraform generates it
 (`random_password.api_token`) and hands it to the Container App as a secret. The
 image refuses to start without it, so **apply Terraform before releasing an image
 that requires it**. Older images ignore the extra variable, so applying first is
@@ -133,8 +133,8 @@ always safe.
 Clients need the token too:
 
 - **claude.ai connector**: an organisation admin sets a request header
-  `Authorization: Bearer <token>` on the custom connector (static request headers
-  are a beta feature of custom connectors).
+  `X-API-Key: <token>` on the custom connector (static request headers are a beta
+  feature of custom connectors).
 - **GitHub**: the `API_TOKEN` environment secret above.
 
 To rotate it: `terraform apply -replace=random_password.api_token`, then update

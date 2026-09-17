@@ -146,7 +146,7 @@ jobs:
             echo "::error::/data answered $status without a token; it must be 401"
             exit 1
           fi
-          auth="Authorization: Bearer $API_TOKEN"
+          auth="X-API-Key: $API_TOKEN"
           curl -fsS -H "$auth" "https://$fqdn/data?country=MWI&limit=1&columns=mean" | grep -q '"total":[1-9]'
           for source in naomi spectrum shipp; do
             curl -fsS -H "$auth" "https://$fqdn/data?country=TZA&source=$source&limit=1&columns=mean" | grep -q '"total":[1-9]' \

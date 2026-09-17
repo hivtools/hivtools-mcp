@@ -27,7 +27,7 @@ app = FastAPI(
     docs_url="/docs" if settings.enable_docs else None,
     redoc_url="/redoc" if settings.enable_docs else None,
 )
-app.add_middleware(auth.BearerAuthMiddleware)
+app.add_middleware(auth.TokenAuthMiddleware)
 app.state.limiter = limiter
 # slowapi's handler is typed with a narrower `exc: RateLimitExceeded` than Starlette's
 # ExceptionHandler protocol; the pairing is correct and is slowapi's documented usage.

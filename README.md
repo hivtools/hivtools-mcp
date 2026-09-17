@@ -33,7 +33,7 @@ flowchart LR
     end
 
     subgraph image["Docker image, run on Azure Container Apps"]
-        auth["Bearer token check"]
+        auth["Token check"]
         mcp["MCP server at /mcp"]
         knowledge[("Knowledge files")]
         subgraph routes["API routes = MCP tools"]
@@ -74,8 +74,8 @@ flowchart LR
 - **Hand-written knowledge.** [`app/knowledge/`](app/knowledge/) holds the facts
   the model outputs don't include: concepts such as "treatment gap", units, age
   groups that are safe to sum, and the server instructions.
-- **One bearer token** protects both the API and `/mcp`. Locally no token is set,
-  so everything is open.
+- **One API token**, sent as an `X-API-Key` header, protects both the API and
+  `/mcp`. Locally no token is set, so everything is open.
 
 ### How an LLM uses the tools
 
@@ -210,8 +210,8 @@ needs Node.js 22.19 or later.
    ```
 1. Add the server: click **Add Servers → Add manually**. Choose the
    **streamable-http** transport and enter the URL `http://localhost:8000/mcp`.
-   If you set `HIVTOOLS_MCP_API_TOKEN`, add the header
-   `Authorization: Bearer <token>`. Click **Add**.
+   If you set `HIVTOOLS_MCP_API_TOKEN`, add the header `X-API-Key: <token>`.
+   Click **Add**.
 1. Switch the server's toggle on to connect, then open **Tools**. You should see
    **Search Hiv Metadata** (`search_hiv_metadata`) and **Get Hiv Data**
    (`get_hiv_data`).
@@ -243,7 +243,7 @@ npx @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp \
   --tool-arg 'q=["Lilongwe"]' --tool-arg country=MWI
 ```
 
-If auth is on, add `--header "Authorization: Bearer <token>"`.
+If auth is on, add `--header "X-API-Key: <token>"`.
 
 ## Deploying
 

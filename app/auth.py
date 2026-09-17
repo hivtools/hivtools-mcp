@@ -1,17 +1,19 @@
-"""Bearer-token authentication for everything except the probes.
+"""API key authentication for everything except the probes.
 
-One shared token, sent as an ``Authorization: Bearer`` header - which is how the
-claude.ai connector sends a static credential (an organisation admin enters it
-when adding the connector). Not all of the data served is public, so the token
-guards the API routes as well as ``/mcp``: the MCP tools are those same routes.
+One shared token, sent as an ``X-API-Key: <token>`` header. The claude.ai
+connector sends it as a static request header, which an organisation admin
+enters when adding the connector. Not all of
+the data served is public, so the token guards the API routes as well as
+``/mcp``: the MCP tools are those same routes.
 
 Pure ASGI middleware rather than a FastAPI dependency, so that it wraps the
 mounted MCP app too, and so no route added later can forget to depend on it.
 
-The MCP tools call back into this same app in-process (see ``app.mcp``), and
-fastmcp deliberately drops ``Authorization`` from the headers it forwards. Those
-calls carry a per-process secret instead. It never leaves memory, and it is only
-ever presented after the outer ``/mcp`` request has itself been authenticated.
+The MCP tools call back into this same app in-process (see ``app.mcp``). Those
+calls carry a per-process secret, rather than depending on which of the caller's
+headers fastmcp chooses to forward (it already strips some credential headers).
+The secret never leaves memory, and it is only ever presented after the outer
+``/mcp`` request has itself been authenticated.
 
 With no token configured the API is open, which is only for local development.
 The container image sets ``require_auth``, so a deployment that is missing its
@@ -56,7 +58,7 @@ _INTERNAL_TOKEN = secrets.token_urlsafe(32)
 
 def internal_headers() -> dict[str, str]:
     """Headers for the in-process client the MCP tools call the API with."""
-    return {"Authorization": f"Bearer {_INTERNAL_TOKEN}"}
+    return {"X-API-Key": _INTERNAL_TOKEN}
 
 
 def check_configuration() -> None:
@@ -77,14 +79,11 @@ def _same(presented: str, expected: str) -> bool:
 
 
 def _authorised(scope: Scope, token: str) -> bool:
-    scheme, _, credentials = Headers(scope=scope).get("authorization", "").partition(" ")
-    if scheme.lower() != "bearer":
-        return False
-    presented = credentials.strip()
-    return _same(presented, token) or _same(presented, _INTERNAL_TOKEN)
+    presented = Headers(scope=scope).get("x-api-key", "").strip()
+    return bool(presented) and (_same(presented, token) or _same(presented, _INTERNAL_TOKEN))
 
 
-class BearerAuthMiddleware:
+class TokenAuthMiddleware:
     def __init__(self, app: ASGIApp) -> None:
         self.app = app
 
@@ -100,8 +99,9 @@ class BearerAuthMiddleware:
             await self.app(scope, receive, send)
             return
         response = JSONResponse(
-            {"detail": "Missing or invalid bearer token"},
+            {"detail": "Missing or invalid X-API-Key header"},
             status_code=401,
-            headers={"WWW-Authenticate": "Bearer"},
+            # Names the header actually checked; "Bearer" would point clients at the wrong one.
+            headers={"WWW-Authenticate": 'ApiKey header="X-API-Key"'},
         )
         await response(scope, receive, send)

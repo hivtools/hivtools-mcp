@@ -12,7 +12,7 @@ class Settings(BaseSettings):
     # Root of the Hive-partitioned Parquet dataset produced by data-prep/extract_indicators.py.
     naomi_data_dir: Path = Path("data-prep/naomi-data")
 
-    # Bearer token every request must carry, bar the health and version endpoints
+    # Token every request must carry, bar the health and version endpoints
     # (see app.auth). Unset leaves the API open, which is for local development
     # only: the container image sets require_auth, which refuses to start without it.
     api_token: SecretStr | None = None
@@ -35,7 +35,7 @@ class Settings(BaseSettings):
     # Per-IP rate limit for /data (slowapi syntax, e.g. "300/minute"). Disable it
     # wholesale with rate_limit_enabled=False (the test suite does). Every
     # claude.ai user arrives from a handful of Anthropic addresses, so this is
-    # effectively shared by all of them: a guard on runaway cost, with the bearer
+    # effectively shared by all of them: a guard on runaway cost, with the API
     # token keeping everyone else out.
     data_rate_limit: str = "300/minute"
     # Search is cheap (an in-memory scan of a few hundred rows) and an agent makes
