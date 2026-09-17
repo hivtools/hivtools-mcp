@@ -26,5 +26,5 @@ API and MCP server for hivtools data
     ![Add API key header](assets/add-api-key.png)
 
 1. Click "Connect"
-1. You should see a list of tools "Get Hiv Data" and "Search Hiv Metadata". Give your AI approval to use these tools by changing the drop-down from "Needs approval" to "Always allow".
+1. You should see a list of tools "Get HIV Data" and "Search HIV Metadata". Give your AI approval to use these tools by changing the drop-down from "Needs approval" to "Always allow".
 1. You can now start a chat and use the tools

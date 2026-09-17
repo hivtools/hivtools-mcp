@@ -81,6 +81,15 @@ def test_only_the_data_routes_are_exposed_as_tools(client: TestClient, mcp_sessi
     assert sorted(tool["name"] for tool in tools) == ["get_hiv_data", "search_hiv_metadata"]
 
 
+def test_tools_have_display_titles(client: TestClient, mcp_session: str):
+    """Set by hand, or fastmcp title-cases the name into "Get Hiv Data"."""
+    tools = _rpc(client, mcp_session, "tools/list")["tools"]
+    assert {tool["name"]: tool["title"] for tool in tools} == {
+        "get_hiv_data": "Get HIV Data",
+        "search_hiv_metadata": "Search HIV Metadata",
+    }
+
+
 def test_every_tool_and_parameter_is_documented(client: TestClient, mcp_session: str):
     # A tool's schema is all an MCP client has to go on when deciding how to call
     # it - an opaque param like `area_id` or `field` is a guess without a
