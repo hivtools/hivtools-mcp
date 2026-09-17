@@ -1,6 +1,6 @@
 [project]
 name = "hivtools-mcp"
-version = "0.3.0"
+version = "0.3.1"
 description = "API and MCP server for hivtools data"
 authors = [{ name = "Rob Ashton", email = "robertashton94@gmail.com" }]
 readme = "README.md"

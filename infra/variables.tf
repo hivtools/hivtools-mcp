@@ -62,9 +62,15 @@ variable "container_registry_name" {
   default     = null
 }
 
+variable "custom_domain" {
+  type        = string
+  description = "Apex domain the app is served on, with an Azure-managed certificate. Its DNS records (output custom_domain_dns_records) must exist before applying. Empty = no custom domain."
+  default     = "hivtools.org"
+}
+
 variable "allowed_ingress_cidrs" {
   type        = list(string)
-  description = "If non-empty, only these CIDRs may reach the app (everything else is denied). Empty = open. Set to Cloudflare's ranges if you put Cloudflare in front."
+  description = "If non-empty, only these CIDRs may reach the app (everything else is denied). Empty = open. Set to Cloudflare's ranges if you put Cloudflare in front. Any restriction stops the custom domain's certificate being issued or renewed, as that is validated over HTTP."
   default     = []
 }
 
