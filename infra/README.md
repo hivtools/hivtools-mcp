@@ -1,8 +1,8 @@
 # infra/ — Azure deployment
 
 Terraform for the production Azure Container Apps deployment: resource group, Log
-Analytics, an Azure Container Registry, Container Apps environment + app, a budget
-alert, and two user-assigned managed identities (one for the Container App to pull
+Analytics, an Azure Container Registry, Container Apps environment + app on a
+custom domain, a budget alert, and two user-assigned managed identities (one for the Container App to pull
 images, one for GitHub Actions to push images and roll revisions via OIDC — no
 Entra *application* registration involved, just ARM role assignments, so this
 never hits the Entra-directory-permission wall a plain Entra-app OIDC setup can).
@@ -18,8 +18,12 @@ cd infra
 cp terraform.tfvars.example terraform.tfvars   # set subscription_id
 az login
 terraform init
-terraform apply
+terraform apply -var custom_domain=
 ```
+
+The custom domain is left out of this first apply because its DNS records need
+the environment's IP address, which doesn't exist yet. Add it afterwards (see
+[Custom domain](#custom-domain)).
 
 This comes up on a placeholder image (`mcr.microsoft.com/k8se/quickstart-full`);
 `min_replicas = 0` means it never actually runs until the first release, so
@@ -85,6 +89,38 @@ files (format in `data-prep/raw-data/datasets.yaml`). It is checked out at
 
 Then bump `../pyproject.toml` to the release version and cut a GitHub Release
 `vX.Y.Z` — `deploy-docs` and `deploy-azure` run.
+
+## Custom domain
+
+The app is served on `hivtools.org` (`var.custom_domain`) with a free
+Azure-managed certificate, which Azure renews by itself. The domain is
+registered at Cloudflare and its DNS is managed there by hand, not by Terraform.
+
+Azure checks the DNS records before it will add the domain, so they must exist
+before the apply that adds it:
+
+1. `terraform apply -refresh-only` to show the records (the
+   `custom_domain_dns_records` output) without changing anything.
+2. In Cloudflare (hivtools.org → DNS → Records), create them as given: an `A`
+   record for the domain and a `TXT` record for `asuid.<domain>`. Set the `A`
+   record to **DNS only** (grey cloud): if Cloudflare proxies it, the domain
+   resolves to Cloudflare, not Azure, and Azure's check fails.
+3. `terraform apply`. Issuing the certificate can take up to 20 minutes.
+
+Azure issues and renews the certificate by fetching a file from the domain over
+plain HTTP. Any `allowed_ingress_cidrs` restriction blocks that, so keep the app
+open while it has a custom domain.
+
+The provider can't attach the managed certificate to the domain, so
+`terraform_data.custom_domain_binding` runs `az containerapp hostname bind` to do
+that. Run Terraform somewhere `az` is logged in to this subscription.
+
+Once the domain serves the app, point clients (the claude.ai connector) at it.
+The `CONTAINER_APP_FQDN` variable can stay as it is: the smoke test works on
+either hostname.
+
+To remove the domain, set `custom_domain = ""` and apply, then delete the DNS
+records.
 
 ## Authentication
 

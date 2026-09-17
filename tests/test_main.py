@@ -18,6 +18,14 @@ def test_version_endpoint(client: TestClient):
     assert response.json()["version"] != "unknown"
 
 
+def test_favicon_is_served_but_not_documented(client: TestClient):
+    response = client.get("/favicon.ico")
+    assert response.status_code == 200
+    assert response.headers["content-type"] == "image/vnd.microsoft.icon"
+    assert response.content.startswith(b"\x00\x00\x01\x00")  # ICO magic number
+    assert "/favicon.ico" not in client.get("/openapi.json").json()["paths"]
+
+
 def test_health_is_ok(client: TestClient):
     response = client.get("/health")
     assert response.status_code == 200

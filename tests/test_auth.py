@@ -68,7 +68,7 @@ def test_the_scheme_is_case_insensitive(guarded: TestClient):
     assert guarded.get("/data", headers={"Authorization": f"bearer {TOKEN}"}).status_code == 200
 
 
-@pytest.mark.parametrize("path", ["/", "/version", "/health", "/health/ready", "/openapi.json"])
+@pytest.mark.parametrize("path", ["/", "/version", "/favicon.ico", "/health", "/health/ready", "/openapi.json"])
 def test_probes_and_metadata_stay_open(guarded: TestClient, path: str):
     """The platform's probes and the release smoke test carry no token."""
     assert guarded.get(path).status_code == 200

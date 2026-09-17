@@ -29,19 +29,18 @@ tools: `search_hiv_metadata` turns plain-language terms into IDs, and
 flowchart LR
     subgraph clients["Clients"]
         claude["claude.ai<br/>custom connector"]
-        inspector["MCP Inspector"]
         curl["curl / browser"]
     end
 
     subgraph image["Docker image, run on Azure Container Apps"]
-        auth["Bearer token check<br/>app/auth.py"]
-        mcp["MCP server at /mcp<br/>app/mcp.py"]
-        knowledge[("Knowledge files<br/>app/knowledge/")]
+        auth["Bearer token check"]
+        mcp["MCP server at /mcp"]
+        knowledge[("Knowledge files")]
         subgraph routes["API routes = MCP tools"]
-            search["GET /search<br/>search_hiv_metadata<br/>app/search.py"]
-            data["GET /data<br/>get_hiv_data<br/>app/indicators.py"]
+            search["GET /search<br/>search_hiv_metadata"]
+            data["GET /data<br/>get_hiv_data"]
         end
-        duckdb["DuckDB, in memory<br/>app/database.py"]
+        duckdb["DuckDB, in memory"]
         parquet[("Parquet dataset")]
 
         auth --> mcp
@@ -61,7 +60,6 @@ flowchart LR
     end
 
     claude -- "MCP over HTTP" --> auth
-    inspector -- "MCP over HTTP" --> auth
     curl -- "HTTP" --> auth
     extract -- "copied into the image" --> parquet
 ```

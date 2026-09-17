@@ -37,10 +37,12 @@ Send = Callable[[Message], Awaitable[None]]
 ASGIApp = Callable[[Scope, Receive, Send], Awaitable[None]]
 
 # Answer without a token: the platform's probes, the version the release smoke
-# test reads, and the schema and docs pages. None of them carry data.
+# test reads, the favicon browsers fetch, and the schema and docs pages. None of
+# them carry data.
 PUBLIC_PATHS = frozenset({
     "/",
     "/version",
+    "/favicon.ico",
     "/health",
     "/health/ready",
     "/openapi.json",
