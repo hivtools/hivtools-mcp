@@ -13,13 +13,19 @@ FACT_VIEW = "indicators"
 
 DIMENSIONS: tuple[str, ...] = (
     "country",
+    "source",
     "area_level",
     "area_id",
     "sex",
     "age_group",
+    "risk_group",
     "calendar_quarter",
     "indicator",
 )
+
+# The models the estimates come from. A (dimension values, indicator) pair can
+# come from more than one of them, as different estimates of the same quantity.
+SOURCES: tuple[str, ...] = ("naomi", "spectrum", "shipp")
 
 # Estimate columns the caller may ask for. ``Measure`` is the single source of
 # truth (a static type usable in the endpoint signature); ``MEASURES`` is just
@@ -27,13 +33,14 @@ DIMENSIONS: tuple[str, ...] = (
 Measure = Literal["mean", "se", "median", "mode", "lower", "upper"]
 MEASURES: tuple[Measure, ...] = get_args(Measure)
 
-# Human labels denormalised onto the fact table at data-prep time. `country` and
-# `sex` are absent deliberately: their codes ('MWI', 'both') are already
-# readable, so a label column would be repetition.
+# Human labels denormalised onto the fact table at data-prep time. `country`,
+# `source` and `sex` are absent deliberately: their codes ('MWI', 'naomi',
+# 'both') are already readable, so a label column would be repetition.
 DIMENSION_LABELS: dict[str, str] = {
     "area_level": "area_level_label",
     "area_id": "area_name",
     "age_group": "age_group_label",
+    "risk_group": "risk_group_label",
     "calendar_quarter": "quarter_label",
     "indicator": "indicator_label",
 }
@@ -45,6 +52,7 @@ DIMENSION_LOOKUPS: dict[str, tuple[str, str, str]] = {
     "area_level": ("dim_area", "area_level", "area_level_label"),
     "area_id": ("dim_area", "area_id", "area_name"),
     "age_group": ("dim_age_group", "age_group", "age_group_label"),
+    "risk_group": ("dim_risk_group", "risk_group", "risk_group_label"),
     "calendar_quarter": ("dim_period", "calendar_quarter", "quarter_label"),
     "indicator": ("dim_indicator", "indicator", "indicator_label"),
 }
@@ -55,23 +63,28 @@ DIMENSION_LOOKUPS: dict[str, tuple[str, str, str]] = {
 SORT_COLUMNS: dict[str, str] = {
     "area_id": "area_sort_order",
     "age_group": "age_group_sort_order",
+    "risk_group": "risk_group_sort_order",
 }
 ORDER_BY: tuple[str, ...] = (
     "country",
+    "source",
     "area_level",
     "area_sort_order",
     "sex",
     "age_group_sort_order",
+    "risk_group_sort_order",
     "calendar_quarter",
     "indicator",
 )
 
 _DIMENSION_TYPES: dict[str, str] = {
     "country": "VARCHAR",
+    "source": "VARCHAR",
     "area_level": "BIGINT",
     "area_id": "VARCHAR",
     "sex": "VARCHAR",
     "age_group": "VARCHAR",
+    "risk_group": "VARCHAR",
     "calendar_quarter": "VARCHAR",
     "indicator": "VARCHAR",
 }
@@ -84,9 +97,11 @@ _FACT_TYPES: dict[str, str] = {
 
 # Only the dimension-table columns the API actually reads. A real dataset carries
 # more (centroids, spectrum codes); these views just have to satisfy the lookups.
+# Like the facts, every dimension table is partitioned by country and source.
 _DIM_TYPES: dict[str, dict[str, str]] = {
     "dim_area": {
         "country": "VARCHAR",
+        "source": "VARCHAR",
         "area_id": "VARCHAR",
         "area_name": "VARCHAR",
         "area_level": "BIGINT",
@@ -96,20 +111,30 @@ _DIM_TYPES: dict[str, dict[str, str]] = {
     },
     "dim_age_group": {
         "country": "VARCHAR",
+        "source": "VARCHAR",
         "age_group": "VARCHAR",
         "age_group_label": "VARCHAR",
         "age_group_sort_order": "BIGINT",
     },
     "dim_period": {
         "country": "VARCHAR",
+        "source": "VARCHAR",
         "calendar_quarter": "VARCHAR",
         "quarter_label": "VARCHAR",
     },
     "dim_indicator": {
         "country": "VARCHAR",
+        "source": "VARCHAR",
         "indicator": "VARCHAR",
         "indicator_label": "VARCHAR",
         "description": "VARCHAR",
+    },
+    "dim_risk_group": {
+        "country": "VARCHAR",
+        "source": "VARCHAR",
+        "risk_group": "VARCHAR",
+        "risk_group_label": "VARCHAR",
+        "risk_group_sort_order": "BIGINT",
     },
 }
 

@@ -213,5 +213,13 @@ __marimo__/
 # data-prep: generated Parquet dataset and extracted raw archives
 data-prep/naomi-data/
 
+# data-prep: private raw data lives in private-data/, a checkout of the private
+# data repo. raw-data/ holds only the public demo inputs, and anything else put
+# there is ignored, so a private file dropped in by mistake cannot be committed.
+data-prep/private-data/
+data-prep/raw-data/*
+!data-prep/raw-data/datasets.yaml
+!data-prep/raw-data/naomi_output_malawi.zip
+
 # demo dataset built from data-prep/raw-data for the container image (see Dockerfile)
 demo-data/

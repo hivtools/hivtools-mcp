@@ -8,9 +8,9 @@ assertions here are about *which* entry wins and how much detail rides with it.
 import pytest
 from fastapi.testclient import TestClient
 
-from app.knowledge.loader import age_aliases, concepts, indicators
+from app.knowledge.loader import age_aliases, concepts, indicators, risk_group_aliases
 from app.main import app
-from app.search import normalise, score_term, search_one, tokens
+from app.search import MAX_LISTED_QUARTERS, _quarters, normalise, score_term, search_one, tokens
 
 
 def alias_owners() -> list[tuple[str, str, str]]:
@@ -18,6 +18,7 @@ def alias_owners() -> list[tuple[str, str, str]]:
     cases = [(a, "concept", name) for name, c in concepts().items() for a in c["aliases"]]
     cases += [(a, "indicator", i) for i, s in indicators().items() for a in s.get("aliases", [])]
     cases += [(a, "age_group", code) for code, aliases in age_aliases().items() for a in aliases]
+    cases += [(a, "risk_group", code) for code, aliases in risk_group_aliases().items() for a in aliases]
     return cases
 
 
@@ -123,10 +124,11 @@ def test_top_concept_comes_back_in_full_and_the_rest_as_summaries(client: TestCl
 
 def test_a_full_concept_carries_its_indicators_with_coverage(client: TestClient):
     """Coverage is what stops the caller asking for a quarter that has no rows."""
-    concept = first(client, "HIV prevalence", field="concept")["results"][0]
+    concept = first(client, "HIV burden", field="concept")["results"][0]
+    assert concept["id"] == "hiv_burden"
     by_id = {item["id"]: item for item in concept["indicators"]}
     assert by_id["prevalence"]["unit"] == "proportion"
-    assert by_id["prevalence"]["coverage"]["calendar_quarter"] == ["CY2020Q3"]
+    assert by_id["prevalence"]["coverage"]["naomi"]["calendar_quarter"] == ["CY2020Q3"]
 
 
 def test_summaries_say_there_is_more_behind_them(client: TestClient):
@@ -205,3 +207,54 @@ def test_limit_bounds_are_enforced(client: TestClient, bad: dict):
 
 def test_query_is_required(client: TestClient):
     assert client.get("/search").status_code == 422
+
+
+# --- sources and risk groups ------------------------------------------------
+
+
+def test_coverage_is_keyed_by_source(client: TestClient):
+    """The sources cover different ground, so coverage says what each one has."""
+    hit = first(client, "PLHIV", field="indicator", country="TZA")["results"][0]
+    assert hit["id"] == "plhiv"
+    assert set(hit["coverage"]) == {"naomi", "spectrum"}
+    assert hit["coverage"]["spectrum"]["area_level"] == [0]
+    # Only a source that splits by risk group says so.
+    assert "risk_group" not in hit["coverage"]["naomi"]
+
+
+def test_coverage_names_the_risk_groups_a_source_has(client: TestClient):
+    hit = first(client, "population", field="indicator", country="TZA")["results"][0]
+    assert hit["coverage"]["shipp"]["risk_group"] == ["msm", "sexpaid12m"]
+
+
+def test_a_long_run_of_quarters_is_given_as_a_span():
+    quarters = [f"CY{year}Q4" for year in range(1970, 1971 + MAX_LISTED_QUARTERS)]
+    assert _quarters(quarters) == {"from": "CY1970Q4", "to": quarters[-1], "count": len(quarters)}
+    assert _quarters(quarters[:2]) == quarters[:2]
+
+
+def test_a_risk_group_says_which_source_and_sex_have_it(client: TestClient):
+    """Female sex workers are only in SHIPP's female rows; querying anything else is empty."""
+    top = first(client, "sex workers", country="TZA")["results"][0]
+    assert (top["field"], top["id"], top["label"]) == ("risk_group", "sexpaid12m", "Female sex workers")
+    assert top["source"] == ["shipp"]
+    assert top["sex"] == ["female"]
+
+
+def test_a_risk_group_with_no_rows_is_not_offered(client: TestClient):
+    """pwid is in the fixture's risk-group table but has no facts behind it."""
+    ids = {hit["id"] for hit in first(client, "people who inject drugs", country="TZA")["results"]}
+    assert "pwid" not in ids
+
+
+def test_the_whole_population_group_is_not_a_search_result(client: TestClient):
+    """'all' is the default, and would otherwise match every phrase containing the word."""
+    index = app.state.search_index
+    assert client is not None
+    assert not [entry for entry in index if entry.field == "risk_group" and entry.id == "all"]
+
+
+def test_key_populations_resolve_to_the_concept(client: TestClient):
+    top = first(client, "key populations")["results"][0]
+    assert (top["field"], top["id"]) == ("concept", "key_populations")
+    assert {item.get("source") for item in top["indicators"]} == {"shipp"}

@@ -29,9 +29,9 @@ from app.schema import DIMENSION_LOOKUPS
 from app.search import Entry
 
 # Dimensions whose values are opaque enough that a near-miss is worth suggesting.
-# `sex` and `area_level` have a handful of values each, so listing them all is
-# more useful than guessing which was meant.
-SEARCHABLE = {"indicator": "indicator", "area_id": "area", "age_group": "age_group"}
+# `sex`, `source` and `area_level` have a handful of values each, so listing them
+# all is more useful than guessing which was meant.
+SEARCHABLE = {"indicator": "indicator", "area_id": "area", "age_group": "age_group", "risk_group": "risk_group"}
 
 SUGGESTIONS = 3
 SUGGESTION_FLOOR = 60.0
@@ -43,8 +43,15 @@ def _rows(count: int) -> str:
 
 
 def _listed(values: Sequence[Any]) -> str:
-    shown = ", ".join(str(value) for value in values[:MAX_LISTED])
-    return f"{shown}, ..." if len(values) > MAX_LISTED else shown
+    """The values, or both ends of them when there are too many.
+
+    Both ends because the values are sorted and the recent end usually matters
+    most: Spectrum's quarters start in 1970.
+    """
+    if len(values) <= MAX_LISTED:
+        return ", ".join(str(value) for value in values)
+    half = MAX_LISTED // 2
+    return ", ".join([*(str(value) for value in values[:half]), "...", *(str(value) for value in values[-half:])])
 
 
 def _in_codelist(cursor: duckdb.DuckDBPyConnection, column: str, values: Sequence[Any]) -> set[Any]:
@@ -57,7 +64,7 @@ def _in_codelist(cursor: duckdb.DuckDBPyConnection, column: str, values: Sequenc
     """
     lookup = DIMENSION_LOOKUPS.get(column)
     if lookup is None:
-        # country and sex have no dimension table; the facts are the codelist.
+        # country, source and sex have no dimension table; the facts are the codelist.
         return set(distinct_values(cursor, column, {column: values}))
     view, key, _ = lookup
     placeholders = ", ".join("?" for _ in values)

@@ -6,287 +6,315 @@
 [![Commit activity](https://img.shields.io/github/commit-activity/m/hivtools/hivtools-mcp)](https://img.shields.io/github/commit-activity/m/hivtools/hivtools-mcp)
 [![License](https://img.shields.io/github/license/hivtools/hivtools-mcp)](https://img.shields.io/github/license/hivtools/hivtools-mcp)
 
-API and MCP server for hivtools data
+An HTTP API and [MCP](https://modelcontextprotocol.io) server that lets an LLM,
+such as Claude through a claude.ai custom connector, answer questions using
+modelled HIV estimates from Naomi, Spectrum and SHIPP. It gives the model two
+tools: `search_hiv_metadata` turns plain-language terms into IDs, and
+`get_hiv_data` returns the estimates for those IDs.
 
-- **Github repository**: <https://github.com/hivtools/hivtools-mcp/>
-- **Documentation** <https://hivtools.github.io/hivtools-mcp/>
+- **GitHub repository**: <https://github.com/hivtools/hivtools-mcp/>
+- **Documentation**: <https://hivtools.github.io/hivtools-mcp/>
 
-## Requirements
+**Contents:** [How it works](#how-it-works) ·
+[Running locally](#running-locally) ·
+[Testing the MCP server locally](#testing-the-mcp-server-locally) ·
+[Deploying](#deploying) ·
+[Further documentation](#further-documentation)
 
-- [uv](https://docs.astral.sh/uv/getting-started/installation/)
+## How it works
 
-## Running
+### Architecture
 
-### Setup
+```mermaid
+flowchart LR
+    subgraph clients["Clients"]
+        claude["claude.ai<br/>custom connector"]
+        inspector["MCP Inspector"]
+        curl["curl / browser"]
+    end
 
-Install the dependencies into a local virtual environment:
+    subgraph image["Docker image, run on Azure Container Apps"]
+        auth["Bearer token check<br/>app/auth.py"]
+        mcp["MCP server at /mcp<br/>app/mcp.py"]
+        knowledge[("Knowledge files<br/>app/knowledge/")]
+        subgraph routes["API routes = MCP tools"]
+            search["GET /search<br/>search_hiv_metadata<br/>app/search.py"]
+            data["GET /data<br/>get_hiv_data<br/>app/indicators.py"]
+        end
+        duckdb["DuckDB, in memory<br/>app/database.py"]
+        parquet[("Parquet dataset")]
 
-```bash
-uv sync
+        auth --> mcp
+        auth --> routes
+        mcp -- "tool calls, in-process" --> routes
+        knowledge -. "server instructions" .-> mcp
+        knowledge -. "concepts, units, aliases" .-> search
+        routes --> duckdb --> parquet
+    end
+
+    subgraph build["make data, at build time"]
+        demo[("Demo inputs<br/>data-prep/raw-data/")]
+        private[("Private inputs<br/>hivtools-mcp-data repo")]
+        extract["extract_indicators.py<br/>+ extract_spectrum_shipp.R"]
+        demo --> extract
+        private --> extract
+    end
+
+    claude -- "MCP over HTTP" --> auth
+    inspector -- "MCP over HTTP" --> auth
+    curl -- "HTTP" --> auth
+    extract -- "copied into the image" --> parquet
 ```
 
-### Running the API & MCP
+- **One app, two interfaces.** [`app/main.py`](app/main.py) is a FastAPI app.
+  [`app/mcp.py`](app/mcp.py) generates the MCP server from that app's OpenAPI
+  schema, so each route is also a tool. A route's docstring is the tool
+  description the model reads.
+- **The data is built ahead of time.** `make data` turns the model outputs into
+  a Parquet dataset, which is copied into the Docker image. Nothing is fetched at
+  runtime, so shipping new data means cutting a new release.
+- **Hand-written knowledge.** [`app/knowledge/`](app/knowledge/) holds the facts
+  the model outputs don't include: concepts such as "treatment gap", units, age
+  groups that are safe to sum, and the server instructions.
+- **One bearer token** protects both the API and `/mcp`. Locally no token is set,
+  so everything is open.
 
-For local development (reloads on file changes):
+### How an LLM uses the tools
+
+```mermaid
+flowchart TD
+    question(["User asks a question, e.g.<br/>'Where is the treatment gap largest in Malawi?'"])
+    search["<b>search_hiv_metadata</b><br/>one q per term:<br/>'treatment gap', 'Malawi'"]
+    ambiguous{"ambiguous?"}
+    choose["Choose on substance,<br/>or ask the user"]
+    answerable{"answerable:<br/>false?"}
+    cannot(["Say the data<br/>cannot answer it"])
+    plan["Take the IDs from the matches.<br/>For a concept, also follow<br/>its notes, coverage and<br/>default_disaggregation"]
+    get["<b>get_hiv_data</b><br/>resolved IDs + one source"]
+    rows{"Any rows?"}
+    diagnostic["Read the diagnostic:<br/>which value or filter is wrong,<br/>and what would work"]
+    read["Read meta first:<br/>unit, basis, source label"]
+    answer(["Answer in the source label's<br/>wording, with lower–upper<br/>intervals. Never sum<br/>overlapping rows."])
+
+    question --> search --> ambiguous
+    ambiguous -- yes --> choose --> answerable
+    ambiguous -- no --> answerable
+    answerable -- yes --> cannot
+    answerable -- no --> plan --> get --> rows
+    rows -- no --> diagnostic -- "fix the filter" --> get
+    rows -- yes --> read --> answer
+```
+
+The model can't guess IDs (the treatment gap is `untreated_plhiv_num`), so it
+always searches first. The tool descriptions in [`app/search.py`](app/search.py)
+and [`app/indicators.py`](app/indicators.py) steer it through this flow, and so do
+the server instructions in
+[`app/knowledge/instructions.md`](app/knowledge/instructions.md). Not every MCP
+client loads server instructions, so anything the model must know goes in the
+tool descriptions as well.
+
+## Running locally
+
+### Requirements
+
+| Tool | Needed for |
+| --- | --- |
+| [uv](https://docs.astral.sh/uv/getting-started/installation/) | Everything. It installs Python (3.10+) and the dependencies. |
+| Git | Cloning the repos |
+| [Node.js](https://nodejs.org/) 22.19+ | [Testing with the MCP Inspector](#testing-the-mcp-server-locally) (`npx`) |
+| Docker | *Optional:* building and running the image |
+| R | *Optional:* building the Spectrum and SHIPP files in the private data |
+| Access to [hivtools-mcp-data](https://github.com/hivtools/hivtools-mcp-data) | *Optional:* the private data. Ask a maintainer. |
+
+### One-time setup
+
+```bash
+git clone git@github.com:hivtools/hivtools-mcp.git
+cd hivtools-mcp
+make install   # creates .venv with uv and installs the pre-commit hooks
+make data      # builds the public demo dataset into data-prep/naomi-data/
+```
+
+Without `make data` the server still starts, but every query returns no rows.
+
+**Optional: private data.** The data that isn't public lives in the private
+[hivtools-mcp-data](https://github.com/hivtools/hivtools-mcp-data) repo. You clone
+it into this repo (the folder is gitignored):
+
+```bash
+git clone git@github.com:hivtools/hivtools-mcp-data.git data-prep/private-data
+make r-deps   # the R packages that read Spectrum and SHIPP files
+make data     # now builds the demo data and the private data
+```
+
+> [!WARNING]
+> This repo is public. Never commit private inputs or anything built from them,
+> and never print them in CI logs.
+
+With the private data checked out, `make test` also checks the knowledge files
+against it. [docs/data.md](docs/data.md) covers how the dataset is built and how to
+update the private data.
+
+### Running the server
 
 ```bash
 make dev
-# equivalent to: uv run fastapi dev app/main.py
 ```
 
-This serves the API at <http://127.0.0.1:8000>, with interactive docs at <http://127.0.0.1:8000/docs>.
+This serves the app at <http://127.0.0.1:8000> and reloads when you change a file.
 
-The API reads the Parquet dataset described in [Data preparation](#data-preparation);
-build that first, or `/data` will just return nothing. By default it looks in
-`data-prep/naomi-data/` - point it elsewhere with `HIVTOOLS_MCP_NAOMI_DATA_DIR`.
-
-The MCP server is avaialble at `/mcp`
-
-### With Docker
-
-```bash
-docker build -t hivtools-mcp .
-docker run -p 80:80 hivtools-mcp
-```
-
-The API is then served at <http://127.0.0.1:80>. The build extracts the demo
-dataset from the zips in `data-prep/raw-data/` (a first build stage runs
-[`data-prep/extract_indicators.py`](data-prep/extract_indicators.py)) and bakes it
-into the image, so a plain `docker build` always ships whatever is in
-`data-prep/raw-data/` at build time. To serve a different dataset instead, mount
-it and override the path:
-
-```bash
-docker run -p 80:80 -v "$PWD/data-prep/naomi-data:/data:ro" -e HIVTOOLS_MCP_NAOMI_DATA_DIR=/data hivtools-mcp
-```
-
-## Data preparation
-
-The API is served from a Parquet dataset built from Naomi model output zips.
-[`data-prep/extract_indicators.py`](data-prep/extract_indicators.py) takes a
-directory of zips, reads each one without unzipping, and writes a fact table, the
-dimension tables that label it, and a provenance manifest - all Hive-partitioned
-by `country`.
-
-```bash
-uv run --script data-prep/extract_indicators.py data-prep/raw-data
-```
-
-Every `*.zip` in the directory is processed. Each country's ISO3 code is read
-from the national (`area_level 0`) row in its data. The result is:
-
-```
-data-prep/naomi-data/
-  manifest.json                          provenance, keyed by country
-  facts/country=MWI/00000000.parquet     indicators.csv + labels + sort keys
-  dim_area/country=MWI/00000000.parquet  meta_area.csv
-  dim_age_group/country=MWI/...          meta_age_group.csv
-  dim_period/country=MWI/...             meta_period.csv
-  dim_indicator/country=MWI/...          meta_indicator.csv
-```
-
-The labels are denormalised onto the fact table as well as kept in the dimension
-tables. That costs about 0.1% on disk - Parquet dictionary-encodes the repeated
-strings - and saves a join on every request. The dimension tables stay because
-they are the source of truth for labels, they are what a name lookup scans (70
-area rows rather than 400,000), and they are where the API reads labels from when
-a query matches no rows and has to explain what was asked for.
-
-`manifest.json` records, per country, the Naomi version that produced the output,
-the input files it was built from (including the PJNZ), the fit options, and
-whether the data is a demonstration dataset. That last one is derived from the
-data rather than configured, so it cannot be set wrong in a deployment.
-
-Query it with partition pruning, e.g.
-`pl.scan_parquet("data-prep/naomi-data/facts/").filter(pl.col("country") == "MWI")`,
-or point DuckDB at the same path. Re-running replaces each country's partition
-and merges that country into the manifest, so it is safe to repeat. Change the
-output root with `--out-dir`; see `--help` for details.
-
-## API
-
-Full schema and a try-it console are at `/docs` when the API is running (disabled in
-production - set `HIVTOOLS_MCP_ENABLE_DOCS=false`; `/openapi.json` stays available).
-
-### `GET /`, `GET /version`
-
-Both return `{"name": "hivtools-mcp", "version": "<pyproject version>"}`.
-
-### `GET /health`, `GET /health/ready`
-
-`/health` is a liveness check (`{"status": "ok"}`). `/health/ready` also checks the DuckDB
-connection answers a query (`{"status": "ready"}`, or `503`). Used by the Azure Container
-Apps probes.
-
-### `GET /search`
-
-Resolves plain-language terms to the IDs `/data` accepts. Nothing in this dataset
-has a guessable ID - the treatment gap is `untreated_plhiv_num`, Lilongwe is
-`MWI_3_13_demo`, children are `Y000_014` - and guessing returns an empty result
-rather than an error, so terms are resolved here first.
-
-One index covers indicators, areas, age groups, age partitions and concepts, each
-result tagged with its `field`. Repeat `q` to resolve several terms in one call:
-
-```bash
-curl "http://127.0.0.1:8000/search?q=treatment+gap&q=children&q=Lilongwe&country=MWI"
-```
-
-| Parameter | Purpose |
+| URL | What it is |
 | --- | --- |
-| `q` | Term to resolve, as a user would phrase it. Repeat for several. |
-| `field` | Restrict to `concept`, `indicator`, `area`, `age_group` or `age_partition`. Omit when unsure. |
-| `country` | ISO3 code; scopes areas, age groups and coverage to one country. |
-| `limit` | Maximum matches per term (default 5). |
+| <http://127.0.0.1:8000/docs> | Interactive API docs |
+| <http://127.0.0.1:8000/mcp> | The MCP server (streamable HTTP) |
+| <http://127.0.0.1:8000/search?q=Lilongwe&country=MWI> | An example search |
 
-The best match comes back in full (`detail: "full"`), the rest as summaries. For a
-concept that means the indicators it maps to, their units, the dimension values
-they actually have rows for, and the caveats that make an answer correct - all of
-which the caller needs *before* querying, not after.
+Every MCP tool call is logged in this terminal, with its arguments and the start
+of the response.
 
-`ambiguous: true` means the top two matches genuinely compete - `Lilongwe` the
-district and `Lilongwe` the district+metro area, or `adults` as 15-49 versus 15+.
-Both are returned in full so the choice can be made on substance, or put to the
-user. Matches of different kinds never compete: a concept and one of the
-indicators it names both match "treatment gap", but that is not a choice.
+To switch auth on, as in production, set a token:
+`HIVTOOLS_MCP_API_TOKEN=some-token make dev`. Settings are environment variables,
+or can go in a `.env` file. See [Configuration](docs/api.md#configuration) for the
+full list.
 
-Matching is layered and dependency-free - exact, then token-set (so "burden of
-HIV" and "HIV burden" are identical), then word-boundary substring, then difflib
-for typos. At a few hundred entries that is microseconds and every score is
-explainable; rapidfuzz and DuckDB's FTS extension are the upgrade path if
-quality, not speed, becomes the limit.
-
-### `GET /data`
-
-Filtered rows from the indicators dataset as JSON:
-`{"meta": { ... }, "total": <n>, "data": [ ... ]}`, where `total` is the number of
-rows matching the filters ignoring `limit`/`offset` (so a caller can page and show
-"N of total").
-
-When nothing matches, the response carries a `diagnostic` explaining why - either
-a value the dataset does not define (with the nearest real ones, via the same
-matcher `/search` uses) or a valid combination with no rows, naming the filter
-responsible and the values that would have worked.
-
-Dimensions identical across every matching row are hoisted into `meta` and dropped
-from the rows - the common query pins five of the six dimensions and varies one,
-so repeating them per row is most of the payload and none of the information.
-`meta` also carries each dimension's label, the `unit` needed to interpret a value
-(`proportion` is a fraction 0-1, so `0.108` means 10.8%), and the `source` of the
-estimates. A dimension is only hoisted when it is provably constant across the
-whole result, not merely constant on the page in hand.
-
-**Filters** - to match any of several values (`OR`), repeat the parameter
-(`?indicator=a&indicator=b`) or comma-separate it (`?indicator=a,b`); different
-parameters combine with `AND`:
-
-| Parameter | Notes |
-| --- | --- |
-| `country` | ISO3, e.g. `MWI` - the partition key, so this is the cheapest filter |
-| `area_level` | integer, `0`-`4` |
-| `area_id` | e.g. `MWI`, `MWI_1_1_demo` |
-| `sex` | `both`, `female`, `male` |
-| `age_group` | e.g. `Y015_049` |
-| `calendar_quarter` | e.g. `CY2024Q3` |
-| `indicator` | e.g. `prevalence`, `art_coverage` |
-
-`age_partition` takes the **name** of an age-group set instead - `five_year_bands`,
-`child_adult` - and expands it to that set's age groups. The groups mix a partition
-with overlapping aggregates (`Y015_049` and `Y000_999` sit in the same column as
-the five-year bands), so a caller assembling a breakdown by hand can easily build
-one that overlaps, and nothing in the result would say so. Naming the set instead
-means the rows returned tile their population exactly and can be added up.
-`search?field=age_partition` lists what is available; it cannot be combined with
-`age_group`.
-
-**Shape**
-
-| Parameter | Default | Notes |
-| --- | --- | --- |
-| `columns` | all six | Which estimate columns to return: `mean`, `se`, `median`, `mode`, `lower`, `upper`. Repeat or comma-separate. This is a projection, not a row filter - the categorical columns above are always returned. |
-| `limit` | `1000` | 1-5000 (`HIVTOOLS_MCP_MAX_ROWS`) |
-| `offset` | `0` | Results are ordered by the categorical columns, so `limit`/`offset` paginate deterministically. |
-| `sig_figs` | `6` (`HIVTOOLS_MCP_RESPONSE_SIG_FIGS`) | Significant figures the measure values are rounded to on the way out, 1-15. The Parquet dataset keeps full model precision; this is presentation only. |
-
-An unknown `columns` value, a non-integer `area_level`, or a `limit`/`sig_figs` outside its
-range, is a `422`. `/data` is rate limited per client IP (`HIVTOOLS_MCP_DATA_RATE_LIMIT`,
-default `30/minute`); over that is a `429`. Responses carry `Cache-Control: public,
-max-age=300` (`HIVTOOLS_MCP_CACHE_MAX_AGE`).
-
-**Examples**
+### Running the tests and checks
 
 ```bash
-# HIV prevalence for 15-49s, national level, just the point estimate and CI
-curl "http://127.0.0.1:8000/data?indicator=prevalence&area_id=MWI&age_group=Y015_049&columns=mean,lower,upper"
-
-# ART coverage for two countries, women, most recent quarter
-curl "http://127.0.0.1:8000/data?indicator=art_coverage&country=MWI,ZWE&sex=female&calendar_quarter=CY2024Q3"
+make test    # pytest, with coverage
+make check   # lock file, pre-commit (ruff), ty type check, deptry
 ```
 
-### Configuration
+CI runs both, and runs the tests on Python 3.10 to 3.14. `make help` lists every
+target.
 
-Environment variables (or a `.env` file), all prefixed `HIVTOOLS_MCP_`:
+### Running with Docker
 
-| Variable | Default | Purpose |
-| --- | --- | --- |
-| `HIVTOOLS_MCP_NAOMI_DATA_DIR` | `data-prep/naomi-data` | Root of the Parquet dataset to serve. |
-| `HIVTOOLS_MCP_SEARCH_RATE_LIMIT` | `120/minute` | Per-IP limit on `/search`; looser than `/data` since an agent makes several lookups per question. |
-| `HIVTOOLS_MCP_DUCKDB_THREADS` | unset (one per core) | Caps threads per query; lower it if many concurrent requests oversubscribe the CPU. |
-| `HIVTOOLS_MCP_RESPONSE_SIG_FIGS` | `6` | Default significant figures for measure values in responses; a request can override with `?sig_figs=`. |
-| `HIVTOOLS_MCP_MAX_ROWS` | `5000` | Largest page `?limit=` may request. |
-| `HIVTOOLS_MCP_DEFAULT_ROWS` | `1000` | Page size when `?limit=` is omitted. |
-| `HIVTOOLS_MCP_DATA_RATE_LIMIT` | `30/minute` | Per-IP rate limit on `/data`. |
-| `HIVTOOLS_MCP_RATE_LIMIT_ENABLED` | `true` | Master switch for the rate limiter. |
-| `HIVTOOLS_MCP_CACHE_MAX_AGE` | `300` | `Cache-Control` max-age (seconds) on `/data` responses. |
-| `HIVTOOLS_MCP_ENABLE_DOCS` | `true` | Serve the interactive `/docs` and `/redoc` consoles. Set `false` in production. |
+```bash
+docker build -t hivtools-mcp .   # public demo data only
+make docker                      # the dataset `make data` builds, private data included
+docker run -p 80:80 -e HIVTOOLS_MCP_API_TOKEN=some-token hivtools-mcp
+```
 
+The app is then at <http://127.0.0.1:80>. The image refuses to start without a
+token, because its data may not be public. For a throwaway local run, add
+`-e HIVTOOLS_MCP_REQUIRE_AUTH=false`. For how data gets into the image, see
+[docs/data.md](docs/data.md#how-data-gets-into-the-docker-image).
 
-## MCP
+## Testing the MCP server locally
 
-The MCP server is available at the `/mcp` endpoint. To test manually the MCP Inspector is the best way.
+Use the [MCP Inspector](https://github.com/modelcontextprotocol/inspector), which
+needs Node.js 22.19 or later.
 
-1. Install and run it with
-   ```
+1. Start the server: `make dev`.
+1. In another terminal, start the Inspector. It opens in your browser.
+   ```bash
    npx @modelcontextprotocol/inspector
    ```
-   This will launch it in your browser.
-1. Run the backend `make dev`
-1. In MCP Inspector add the local server. Click "Add Servers" -> "Add manually". Use "streamable-http" as the transport and the URL to the backend url which should be "localhost:8000/mcp". Click "Add".
-1. Switch the toggle to connect to the server and then click "Tools" in the top. You should see "Get Hiv Data"
-1. Click on this and you can enter content in fields. They need to be valid JSON so use quotes e.g. `"MWI"` and click "Execute Tool" to see the response data.
+1. Add the server: click **Add Servers → Add manually**. Choose the
+   **streamable-http** transport and enter the URL `http://localhost:8000/mcp`.
+   If you set `HIVTOOLS_MCP_API_TOKEN`, add the header
+   `Authorization: Bearer <token>`. Click **Add**.
+1. Switch the server's toggle on to connect, then open **Tools**. You should see
+   **Search Hiv Metadata** (`search_hiv_metadata`) and **Get Hiv Data**
+   (`get_hiv_data`).
+1. Pick a tool, fill in its arguments and click **Execute Tool**. Arguments must
+   be valid JSON, so put quotes around strings (`"MWI"`) and write lists like
+   `["Lilongwe"]`.
 
-## Deployment
+To see what the model sees, follow [the flow above](#how-an-llm-uses-the-tools)
+with the demo data:
 
-Production runs on Azure Container Apps, provisioned with Terraform in [`infra/`](infra/)
-(see [`infra/README.md`](infra/README.md) for setup).
+1. `search_hiv_metadata` with `q` = `["treatment gap", "Lilongwe"]` and
+   `country` = `"MWI"`. The first result for each term is a concept or an area
+   with its ID.
+1. `get_hiv_data` with those IDs, for example `indicator` =
+   `["untreated_plhiv_num"]` and `area_id` = `["MWI_3_13_demo"]`.
+1. Try a wrong ID, such as `area_id` = `["Lilongwe"]`, to see the `diagnostic`.
 
-To ship a code change to production:
+### From the command line
 
-1. Bump `version` in `pyproject.toml`.
-2. Merge to `main`.
-3. Cut a GitHub Release tagged `vX.Y.Z` matching that version.
-
-Publishing the release triggers `.github/workflows/on-release-main.yml`, which builds and
-pushes the image to Azure Container Registry tagged `vX.Y.Z`, rolls a new Container Apps
-revision, and publishes the docs site - no manual deploy step. The release tag must match
-`pyproject.toml`'s version or the deploy job fails fast.
-
-## Development
-
-### Setup
-
-Setup the pre-commit hooks
+The Inspector also has a CLI mode, which is handy for quick checks:
 
 ```bash
-make install
+# List the tools
+npx @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp --method tools/list
+
+# Call a tool
+npx @modelcontextprotocol/inspector --cli http://127.0.0.1:8000/mcp \
+  --method tools/call --tool-name search_hiv_metadata \
+  --tool-arg 'q=["Lilongwe"]' --tool-arg country=MWI
 ```
 
-### Running the tests
+If auth is on, add `--header "Authorization: Bearer <token>"`.
 
-```bash
-make test
-```
+## Deploying
 
-## Contributing
+Production runs on Azure Container Apps. Publishing a GitHub Release deploys it,
+and there are no manual steps.
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the local development workflow and code-quality checks.
+**What you need:** write access to this repo, so you can merge to `main` and
+publish releases. You don't need Azure access to release, only to
+[change the infrastructure](#changing-the-infrastructure).
+
+### Releasing a new version
+
+1. In your PR, bump `version` in `pyproject.toml`:
+   ```bash
+   uv version --bump patch   # or minor / major; also updates uv.lock
+   ```
+1. Merge the PR to `main`.
+1. Publish a GitHub Release. Its tag is the new version with a `v` in front.
+   You can do this in the GitHub UI (**Releases → Draft a new release**) or with:
+   ```bash
+   gh release create v0.3.1 --target main --generate-notes
+   ```
+1. Watch the **release-main** workflow in the Actions tab, or with `gh run watch`.
+
+The release runs
+[`.github/workflows/on-release-main.yml`](.github/workflows/on-release-main.yml),
+which:
+
+1. Fails fast if the tag doesn't match the version in `pyproject.toml`.
+1. Checks out the private data repo and builds the dataset with `make data`.
+1. Builds the image and pushes it to Azure Container Registry, tagged `vX.Y.Z`.
+1. Rolls a new Container Apps revision onto that image.
+1. Smoke-tests the new revision: it checks the health and version endpoints, that
+   `/data` refuses requests without the token, and that each source is served.
+1. Publishes the documentation site to GitHub Pages.
+
+To check it afterwards, the workflow run's summary page links to the live app
+(the `production` environment). `https://<that host>/version` should return the
+new version.
+
+### Shipping new data
+
+The data is built into the image, so new data also ships as a release:
+
+1. Push the data change to hivtools-mcp-data. See
+   [Updating the private data](docs/data.md#updating-it).
+1. Bump the version and publish a release, as above. A release tag can only be
+   used once, so a data-only release still needs a version bump.
+
+The release builds from the data repo's default branch, or from the
+`DATA_REPO_REF` variable if it is set on the `production` environment. The image
+registry is private, but anyone who can pull the image can read the data.
+
+### Changing the infrastructure
+
+The Azure resources are managed with Terraform in [`infra/`](infra/). CI only
+validates it. Someone applies it by hand, which needs Azure access and the local
+state file. [`infra/README.md`](infra/README.md) covers this, plus the one-time
+setup: provisioning, the GitHub variables and secrets the release needs, and
+rotating the API token.
+
+## Further documentation
+
+- [docs/data.md](docs/data.md): the data sources, `datasets.yaml`, the private
+  data repo, how the Parquet dataset is built, and how it gets into the image.
+- [docs/api.md](docs/api.md): HTTP API reference for `/search` and `/data`,
+  authentication, and every configuration setting.
+- [infra/README.md](infra/README.md): the Azure infrastructure and one-time
+  deployment setup.
+- [app/knowledge/](app/knowledge/): the hand-written knowledge files the tools
+  serve.
+- [CONTRIBUTING.md](CONTRIBUTING.md): how to contribute.

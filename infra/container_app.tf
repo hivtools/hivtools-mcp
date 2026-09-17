@@ -15,6 +15,11 @@ resource "azurerm_container_app" "main" {
     identity = azurerm_user_assigned_identity.container_app_pull.id
   }
 
+  secret {
+    name  = "api-token"
+    value = random_password.api_token.result
+  }
+
   ingress {
     external_enabled = true
     target_port      = 80
@@ -52,8 +57,8 @@ resource "azurerm_container_app" "main" {
       memory = var.memory
 
       env {
-        name  = "HIVTOOLS_MCP_NAOMI_DATA_DIR"
-        value = "/code/demo-data"
+        name        = "HIVTOOLS_MCP_API_TOKEN"
+        secret_name = "api-token"
       }
       env {
         name  = "HIVTOOLS_MCP_DUCKDB_THREADS"

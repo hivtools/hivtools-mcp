@@ -47,3 +47,9 @@ output "azure_subscription_id" {
   description = "Set as the AZURE_SUBSCRIPTION_ID repo variable."
   value       = data.azurerm_client_config.current.subscription_id
 }
+
+output "api_token" {
+  description = "Bearer token for the API and MCP. Set as the API_TOKEN secret in the production environment, and as the claude.ai connector's Authorization header (Bearer <token>)."
+  value       = random_password.api_token.result
+  sensitive   = true
+}

@@ -1,16 +1,17 @@
 """Reads the hand-authored knowledge files that sit alongside this module.
 
 Three YAML files plus a markdown document, all version-controlled and reviewable
-by a domain expert. They hold what the Naomi model output does *not* carry:
+by a domain expert. They hold what the model outputs do *not* carry:
 
 - ``instructions.md``  the dataset-wide semantic document, served as the MCP
   server's ``instructions`` field so it reaches the model before any tool call.
 - ``concepts.yaml``    plain-language phrases ("treatment gap") mapped to the
   indicators that encode them.
 - ``dimensions.yaml``  which age-group sets may safely be summed, and the
-  plain-language names people use for age groups. The age groups mix a partition
-  with overlapping aggregates, and nothing in the source metadata says which is
-  which; nor does anything there record that "children" means 0-14.
+  plain-language names people use for age groups and risk groups. The age groups
+  mix a partition with overlapping aggregates, and nothing in the source metadata
+  says which is which; nor does anything there record that "children" means 0-14,
+  or that "FSW" means the ``sexpaid12m`` risk group.
 - ``indicators.yaml``  per-indicator units and search aliases. Units are not in
   the source metadata (its format/scale columns are empty), and getting them
   wrong misreports a proportion by 100x.
@@ -18,8 +19,8 @@ by a domain expert. They hold what the Naomi model output does *not* carry:
 Known data artefacts are deliberately absent: describing why a modelled value
 looks wrong is an epidemiologist's call, not something to infer from the numbers.
 
-Everything here is **universal to Naomi output**, not specific to one country or
-model run. Labels, hierarchy and sort order come from the Naomi zip's
+Everything here is **universal to the models' output** (Naomi, Spectrum and
+SHIPP), not specific to one country or model run. Labels, hierarchy and sort order come from the Naomi zip's
 ``meta_*.csv`` files at data-prep time; per-country coverage (which quarters,
 which area levels, how many districts) is generated from the data and served by
 the discovery endpoints, because it differs per country and so cannot live in a
@@ -50,7 +51,7 @@ def concepts() -> dict[str, Any]:
 
 
 def dimensions() -> dict[str, Any]:
-    """Per-dimension semantics. Currently only age-group partitions."""
+    """Per-dimension semantics: age-group partitions, and age- and risk-group aliases."""
     return _load_yaml("dimensions")
 
 
@@ -93,3 +94,8 @@ def age_partitions() -> dict[str, dict[str, Any]]:
     """
     age_group = dimensions()["age_group"]
     return {name: {"total": age_group["total_value"], **spec} for name, spec in age_group["partitions"].items()}
+
+
+def risk_group_aliases() -> dict[str, list[str]]:
+    """Plain-language names for behavioural risk groups, keyed by risk group code."""
+    return dimensions()["risk_group"].get("aliases", {})

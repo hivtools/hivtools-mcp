@@ -2,11 +2,11 @@
 
 Response shape: dimensions that are identical across every matching row are
 hoisted into a ``meta`` block and dropped from the rows, because the common query
-here pins five of the six dimensions and varies one ("this indicator, this
-quarter, every district"). Repeating the pinned values on every row is most of
-the payload and none of the information. ``meta`` is also where a value becomes
+here pins all but one dimension and varies one ("this indicator, this quarter,
+every district"). Repeating the pinned values on every row is most of the payload
+and none of the information. ``meta`` is also where a value becomes
 interpretable - the unit that says 0.108 is 10.8% rather than 0.108%, and the
-provenance that says these are demonstration figures.
+provenance that says how the figures must be described.
 
 A dimension is only hoisted when it is *provably* constant across the whole
 result: either the caller pinned it to a single value, or this page is the entire
@@ -64,7 +64,9 @@ class DataResponse(BaseModel):
         "indicator is one of them it also carries `unit` (`proportion` is a fraction 0-1, so "
         "0.108 means 10.8%; `count` is people; `rate_per_person_year` is per person per year) "
         "and `basis` (`residents` = people who live in the area, `attending` = people who "
-        "receive care there). `source` names the model run the figures come from."
+        "receive care there). `source` is the model the figures come from, and its `label` "
+        "says how they must be described when reported. When rows come from several sources, "
+        "`sources` gives that description for each."
     )
     total: int = Field(
         description="Total rows matching the filters, ignoring `limit`/`offset`."
@@ -82,7 +84,8 @@ class DataResponse(BaseModel):
         description="The current page of matching rows, carrying only the dimensions that "
         "vary across the result - everything else is in `meta`. A varying dimension with a "
         "label appears as both, e.g. `area_id` alongside `area_name`. Measure columns are "
-        "whichever were requested via `columns` (all six by default)."
+        "whichever were requested via `columns` (all six by default); Spectrum and SHIPP "
+        "estimates only have `mean`, so their other measures are null."
     )
 
 
@@ -206,6 +209,17 @@ def constant_dimensions(
     return constants
 
 
+def source_descriptions(manifest: dict[str, Any], country: str | None, source: str | None) -> dict[str, dict[str, str]]:
+    """How each source in scope must be described, per country, from the manifest."""
+    countries = [country] if country is not None else sorted(manifest)
+    found: dict[str, dict[str, str]] = {}
+    for name in countries:
+        for key, entry in manifest.get(name, {}).get("sources", {}).items():
+            if (source is None or key == source) and entry.get("description"):
+                found.setdefault(name, {})[key] = entry["description"]
+    return found
+
+
 def build_meta(
     cursor: duckdb.DuckDBPyConnection,
     constants: dict[str, Any],
@@ -230,21 +244,22 @@ def build_meta(
         if spec is not None:
             meta["indicator"] = {**meta["indicator"], "unit": spec["unit"], "basis": spec["basis"]}
 
-    # The country's display name and its provenance both come from the manifest;
-    # neither is a column on the fact table.
+    # The country's display name and how its figures must be described both come
+    # from the manifest; neither is a column on the fact table.
     country = constants.get("country")
-    entry = manifest.get(country) if country is not None else None
-    if entry is not None:
-        meta["source"] = entry["source"]
-        label = entry.get("country_label")
-        if label:
-            meta["country"] = {"id": country, "label": label}
-    else:
-        sources = sorted({item["source"] for item in manifest.values() if item.get("source")})
-        if len(sources) == 1:
-            meta["source"] = sources[0]
-        elif sources:
-            meta["source"] = sources
+    label = manifest.get(country, {}).get("country_label") if country is not None else None
+    if label:
+        meta["country"] = {"id": country, "label": label}
+
+    source = constants.get("source")
+    described = source_descriptions(manifest, country, source)
+    if source is not None:
+        meta["source"] = {"id": source}
+        if country is not None and source in described.get(country, {}):
+            meta["source"]["label"] = described[country][source]
+            return meta
+    if described:
+        meta["sources"] = described[country] if country is not None else described
     return meta
 
 
@@ -259,9 +274,9 @@ def strip_constants(row: dict[str, Any], constants: dict[str, Any]) -> dict[str,
     response_model=DataResponse,
     response_model_exclude_none=True,
     operation_id="get_hiv_data",
-    summary="Query HIV epidemic indicator estimates from the Naomi model",
+    summary="Query HIV estimates from the Naomi, Spectrum and SHIPP models",
 )
-@limiter.limit(settings.data_rate_limit)
+@limiter.limit(lambda: settings.data_rate_limit)
 def get_data(
     request: Request,  # required by slowapi's rate-limit decorator
     response: Response,
@@ -271,6 +286,17 @@ def get_data(
     country: Annotated[
         list[str] | None,
         Query(description="ISO3 country code, e.g. 'MWI', 'ZWE'. The partition key, so filtering by it is cheap."),
+    ] = None,
+    source: Annotated[
+        list[str] | None,
+        Query(
+            description="Model the estimates come from: 'naomi' (subnational, a few recent quarters, with "
+            "uncertainty intervals), 'spectrum' (national only, one value per year since 1970 - later years "
+            "are projections) or 'shipp' (adults 15-49 split by behavioural `risk_group`). An indicator from "
+            "two sources is the same quantity estimated by two models: pick one, never add them. Which "
+            "sources an indicator has is in its coverage from `search_hiv_metadata`. ALWAYS tell "
+            "the user what source the value is from."
+        ),
     ] = None,
     area_level: Annotated[
         list[str] | None,
@@ -298,11 +324,21 @@ def get_data(
             "ages. Resolve phrases like 'children' or 'adults' with `search_hiv_metadata`."
         ),
     ] = None,
+    risk_group: Annotated[
+        list[str] | None,
+        Query(
+            description="Behavioural risk group, e.g. 'sexpaid12m' (female sex workers), 'msm' or 'pwid'. "
+            "'all' is the whole population and the only value Naomi and Spectrum have; the rest come from "
+            "source 'shipp'. Within one sex the groups do not overlap and add up to the whole population. "
+            "Resolve names like 'sex workers' with `search_hiv_metadata`, which says which sexes have each."
+        ),
+    ] = None,
     calendar_quarter: Annotated[
         list[str] | None,
         Query(
             description="Estimate quarter as 'CY<year>Q<quarter>', e.g. 'CY2024Q3' for Q3 2024. Not every "
-            "indicator covers every quarter; check the indicator's coverage from `search_hiv_metadata`."
+            "indicator or source covers every quarter - Spectrum has one quarter per year - so check the "
+            "indicator's coverage from `search_hiv_metadata`."
         ),
     ] = None,
     indicator: Annotated[
@@ -346,23 +382,34 @@ def get_data(
     ] = None,
     user_question: UserQuestion = None,  # logged by the MCP layer, unused here
 ) -> DataResponse:
-    """Filtered rows from the Naomi HIV model's indicator estimates.
+    """Filtered rows of modelled HIV estimates.
 
-    Call `search_hiv_metadata` first to resolve every indicator, area, age group
-    and age partition in the user's question to an ID. IDs are not guessable (the
-    treatment gap is `untreated_plhiv_num`, Lilongwe is `MWI_3_13_demo`), a wrong
-    one returns no rows, and search also says which quarters each indicator covers.
+    Call `search_hiv_metadata` first to resolve every indicator, area, age group,
+    age partition and risk group in the user's question to an ID. IDs are not
+    guessable (the treatment gap is `untreated_plhiv_num`, Lilongwe is
+    `MWI_3_13_demo`), a wrong one returns no rows, and search also says which
+    sources and quarters each indicator covers.
 
     Each row is one modelled estimate for a unique combination of the dimensions
-    (country, area_level, area_id, sex, age_group, calendar_quarter, indicator);
-    `columns` picks which summary-statistic measures (mean, se, median, mode,
-    lower, upper) come back alongside them.
+    (country, source, area_level, area_id, sex, age_group, risk_group,
+    calendar_quarter, indicator); `columns` picks which summary-statistic
+    measures (mean, se, median, mode, lower, upper) come back alongside them.
+
+    `source` is the model behind a row. `naomi` is subnational, for a few recent
+    quarters, with uncertainty intervals. `spectrum` is national only, one value
+    per year from 1970 - use it for long-term trends, and say that future years
+    are projections. `shipp` splits adults 15-49 by behavioural `risk_group`
+    (female sex workers, MSM, PWID and others) for one year. Spectrum and SHIPP
+    give point estimates only. An indicator from two sources is two estimates of
+    the same quantity: pass `source` to pick one, and never add rows from
+    different sources together. Not every country has every source.
 
     Dimensions that are the same for every matching row are returned once in
     `meta` rather than repeated on each row, so read `meta` first: it carries the
-    labels, the `unit` needed to interpret a value, and the `source` of the
-    estimates. Rows carry only what varies, with labels alongside codes
-    (`area_id` and `area_name`).
+    labels and the `unit` needed to interpret a value. Its `source` label (or
+    `sources`) says how the figures must be described - use that wording when
+    reporting them, and call demonstration data synthetic. Rows carry only what
+    varies, with labels alongside codes (`area_id` and `area_name`).
 
     Filters combine with AND across different parameters; repeating a parameter
     or comma-separating its value is OR within that parameter, e.g.
@@ -372,10 +419,12 @@ def get_data(
     figs = sig_figs if sig_figs is not None else settings.response_sig_figs
     filters: dict[str, Sequence[Any] | None] = {
         "country": _split(country),
+        "source": _split(source),
         "area_level": _levels(area_level),
         "area_id": _split(area_id),
         "sex": _split(sex),
         "age_group": _age_groups(age_group, age_partition),
+        "risk_group": _split(risk_group),
         "calendar_quarter": _split(calendar_quarter),
         "indicator": _split(indicator),
     }

@@ -1,9 +1,9 @@
 """DuckDB access to the Naomi Parquet dataset.
 
 The dataset written by ``data-prep/extract_indicators.py`` is a fact table plus
-four dimension tables, each Hive-partitioned by country, and a JSON manifest of
-provenance. Each becomes a view on one shared connection; the manifest is read
-once into application state.
+five dimension tables, each Hive-partitioned by country and source, and a JSON
+manifest of provenance. Each becomes a view on one shared connection; the
+manifest is read once into application state.
 
 Concurrency model: one in-process DuckDB connection is created at startup and
 shared. It is never written to - the durable data is Parquet, which any number of
@@ -37,8 +37,10 @@ def _create_view(connection: duckdb.DuckDBPyConnection, view: str, subdir: str, 
     directory = settings.naomi_data_dir / subdir
     if directory.is_dir() and any(directory.glob("**/*.parquet")):
         # The glob is trusted config and is passed as a Python argument to the
-        # relation API, never interpolated into a SQL string.
-        relation = connection.read_parquet(f"{directory}/**/*.parquet", hive_partitioning=True)
+        # relation API, never interpolated into a SQL string. Columns are matched
+        # by name: the sources are written by different tools (polars and R's
+        # arrow), and a source may only carry some of a table's columns.
+        relation = connection.read_parquet(f"{directory}/**/*.parquet", hive_partitioning=True, union_by_name=True)
     else:
         relation = connection.sql(empty_sql)
     relation.create_view(view)
@@ -59,6 +61,8 @@ def create_connection() -> duckdb.DuckDBPyConnection:
 def load_manifest(data_dir: Path | None = None) -> dict[str, Any]:
     """Per-country provenance written by data-prep, keyed by ISO3 code.
 
+    Each country carries its display name and, under ``sources``, a
+    ``description`` per source saying how its figures should be described.
     Absent for a dataset built before manifests, or none at all; callers treat a
     missing entry as "provenance unknown" rather than an error.
     """

@@ -9,6 +9,8 @@ copyright: Maintained by Rob Ashton.
 
 nav:
   - Home: index.md
+  - Data: data.md
+  - API reference: api.md
   - Modules: modules.md
 plugins:
   - search

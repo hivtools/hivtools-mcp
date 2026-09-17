@@ -11,6 +11,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import settings as settings_module
+from app.diagnostics import MAX_LISTED, _listed
 from app.main import app
 
 
@@ -96,3 +97,33 @@ def test_an_empty_dataset_says_so_rather_than_blaming_a_filter(tmp_path: Path, m
     with TestClient(app) as client:
         body = client.get("/data").json()
     assert body["diagnostic"] == "The dataset is empty - no data has been loaded."
+
+
+# --- source and risk_group ----------------------------------------------------
+
+
+def test_unknown_source_lists_the_valid_ones(client: TestClient):
+    message = diagnostic(client, country="TZA", source="unaids")
+    assert "Unknown source 'unaids'" in message
+    assert "naomi, shipp, spectrum" in message
+
+
+def test_unknown_risk_group_is_corrected_by_name(client: TestClient):
+    message = diagnostic(client, country="TZA", risk_group="sex workers")
+    assert "Did you mean: sexpaid12m (Female sex workers)" in message
+
+
+def test_asking_the_wrong_source_for_a_risk_group_names_the_right_one(client: TestClient):
+    message = diagnostic(client, country="TZA", source="naomi", risk_group="msm", indicator="population")
+    assert "Dropping source" in message
+    assert "source can be: shipp" in message
+
+
+def test_a_long_list_of_values_shows_both_ends():
+    """Sorted quarters start in 1970; the recent end is the one usually wanted."""
+    values = [f"CY{year}Q4" for year in range(1970, 2031)]
+    listed = _listed(values)
+    assert listed.startswith("CY1970Q4, ")
+    assert listed.endswith(", CY2030Q4")
+    assert ", ..., " in listed
+    assert len(listed.split(", ")) == MAX_LISTED + 1

@@ -89,13 +89,13 @@ variable "http_concurrency" {
 variable "cpu" {
   type        = number
   description = "vCPU per replica."
-  default     = 0.25
+  default     = 0.5
 }
 
 variable "memory" {
   type        = string
   description = "Memory per replica (must pair with cpu per the ACA allowed combinations)."
-  default     = "0.5Gi"
+  default     = "1Gi"
 }
 
 variable "log_retention_days" {

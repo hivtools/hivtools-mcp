@@ -99,10 +99,12 @@ def test_data_tool_exposes_every_filter(client: TestClient, mcp_session: str):
     properties = tools["get_hiv_data"]["inputSchema"]["properties"]
     assert set(properties) == {
         "country",
+        "source",
         "area_level",
         "area_id",
         "sex",
         "age_group",
+        "risk_group",
         "age_partition",
         "calendar_quarter",
         "indicator",
@@ -120,7 +122,7 @@ def test_data_tool_tells_the_model_to_resolve_ids_with_search(client: TestClient
     tools = {tool["name"]: tool for tool in _rpc(client, mcp_session, "tools/list")["tools"]}
     data_tool = tools["get_hiv_data"]
     assert "search_hiv_metadata" in data_tool["description"]
-    for name in ("indicator", "area_id", "age_group", "age_partition", "calendar_quarter"):
+    for name in ("indicator", "area_id", "age_group", "age_partition", "risk_group", "calendar_quarter", "source"):
         assert "search_hiv_metadata" in data_tool["inputSchema"]["properties"][name]["description"], name
 
 
@@ -162,7 +164,7 @@ def test_logged_response_is_truncated(
     assert len(record["response"]) == 10
     assert record["response_chars"] > 10
     # Pulled from the full response, so it survives truncation.
-    assert record["total"] == 4
+    assert record["total"] == 8
 
 
 def test_empty_result_logs_its_diagnostic(client: TestClient, mcp_session: str, tool_logs: list[dict]):
@@ -207,7 +209,7 @@ def test_tool_call_returns_real_data(client: TestClient, mcp_session: str):
     result = _rpc(client, mcp_session, "tools/call", {"name": "get_hiv_data", "arguments": {"limit": 2}})
     assert result["isError"] is False
     payload = json.loads(result["content"][0]["text"])
-    assert payload["total"] == 4
+    assert payload["total"] == 8
     assert len(payload["data"]) == 2
 
 
