@@ -131,24 +131,62 @@ jobs:
           resourceGroup: ${{ vars.RESOURCE_GROUP }}
           imageToDeploy: ${{ vars.ACR_LOGIN_SERVER }}/hivtools-mcp:${{ github.event.release.tag_name }}
 
-      # Responses are only ever piped to grep: the log is public.
+      # Data responses are only ever piped to grep: the log is public. /version is
+      # printed, as it holds nothing but the name and version.
       - name: Smoke test
         env:
           API_TOKEN: ${{ secrets.API_TOKEN }}
+          FQDN: ${{ vars.CONTAINER_APP_FQDN }}
+          VERSION: ${{ github.event.release.tag_name }}
         run: |
-          fqdn=${{ vars.CONTAINER_APP_FQDN }}
-          for _ in $(seq 1 30); do
-            curl -fsS "https://$fqdn/health" && break || sleep 5
-          done
-          curl -fsS "https://$fqdn/version"
-          status=$(curl -s -o /dev/null -w '%{http_code}' "https://$fqdn/data?limit=1")
-          if [ "$status" != 401 ]; then
-            echo "::error::/data answered $status without a token; it must be 401"
-            exit 1
-          fi
-          auth="X-API-Key: $API_TOKEN"
-          curl -fsS -H "$auth" "https://$fqdn/data?country=MWI&limit=1&columns=mean" | grep -q '"total":[1-9]'
+          VERSION=${VERSION#v}
+
+          # Runs the rest of the arguments up to $1 times, waiting 5s, 10s, 20s,
+          # then 30s between tries.
+          retry() {
+            local attempts=$1 delay=5 attempt
+            shift
+            for attempt in $(seq 1 "$attempts"); do
+              "$@" && return 0
+              if [ "$attempt" -lt "$attempts" ]; then
+                echo "Attempt $attempt/$attempts failed, retrying in ${delay}s"
+                sleep "$delay"
+                delay=$(( delay * 2 < 30 ? delay * 2 : 30 ))
+              fi
+            done
+            return 1
+          }
+
+          serves_release() {
+            local response
+            response=$(curl -fsS --max-time 60 "https://$FQDN/version") || return 1
+            echo "$response"
+            grep -qF "\"version\":\"$VERSION\"" <<< "$response"
+          }
+
+          refuses_anonymous() {
+            local status
+            status=$(curl -s -o /dev/null -w '%{http_code}' --max-time 60 "https://$FQDN/data?limit=1")
+            [ "$status" = 401 ] || { echo "/data answered $status without a token; it must be 401"; return 1; }
+          }
+
+          has_data() {
+            curl -fsS --max-time 60 -H "Authorization: Bearer $API_TOKEN" "https://$FQDN/data?$1&limit=1&columns=mean" \
+              | grep -q '"total":[1-9]'
+          }
+
+          # The deploy step returns before the new revision takes traffic, and the
+          # old one answers until then. About 5 minutes of retries covers that.
+          retry 12 serves_release \
+            || { echo "::error::$FQDN never reported version $VERSION"; exit 1; }
+
+          # A few retries more on each check, in case the old revision still
+          # takes the odd request while it drains.
+          retry 3 refuses_anonymous \
+            || { echo "::error::/data must refuse requests without a token"; exit 1; }
+          retry 3 has_data "country=MWI" \
+            || { echo "::error::no MWI data served"; exit 1; }
           for source in naomi spectrum shipp; do
-            curl -fsS -H "$auth" "https://$fqdn/data?country=TZA&source=$source&limit=1&columns=mean" | grep -q '"total":[1-9]' \
+            retry 3 has_data "country=TZA&source=$source" \
               || { echo "::error::no TZA $source data served"; exit 1; }
           done

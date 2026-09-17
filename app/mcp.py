@@ -15,9 +15,9 @@ it alone; the same facts are enforced in responses.
 
 Every tool call is logged by ``app.observability.ToolCallLogger``.
 
-The generated tools call ``api_app`` in-process, and so pass through its API key
-check like any other request. They authenticate with ``app.auth``'s per-process
-token, which takes priority over any caller headers fastmcp forwards.
+The generated tools call ``api_app`` in-process, and so pass through its bearer
+auth like any other request. They authenticate with ``app.auth``'s per-process
+token, since fastmcp does not forward the caller's own ``Authorization`` header.
 """
 
 from fastapi import FastAPI

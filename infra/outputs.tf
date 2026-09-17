@@ -64,7 +64,7 @@ output "azure_subscription_id" {
 }
 
 output "api_token" {
-  description = "Token for the API and MCP. Set as the API_TOKEN secret in the production environment, and as the claude.ai connector's X-API-Key header."
+  description = "Token for the API and MCP. Set as the API_TOKEN secret in the production environment, and as the claude.ai connector's authorization header (Bearer <token>)."
   value       = random_password.api_token.result
   sensitive   = true
 }

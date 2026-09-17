@@ -133,8 +133,9 @@ always safe.
 Clients need the token too:
 
 - **claude.ai connector**: an organisation admin sets a request header
-  `X-API-Key: <token>` on the custom connector (static request headers are a beta
-  feature of custom connectors).
+  `authorization` with the value `Bearer <token>` on the custom connector
+  (static request headers are a beta feature of custom connectors). Claude sends
+  the value exactly as entered, so it must include `Bearer `.
 - **GitHub**: the `API_TOKEN` environment secret above.
 
 To rotate it: `terraform apply -replace=random_password.api_token`, then update
@@ -142,6 +143,49 @@ both of the above. Requests with the old token fail from the moment the new
 revision is live.
 
 The token is in Terraform state, which is local and gitignored - keep it that way.
+
+## Logs
+
+The app's output goes to the Log Analytics workspace `log-hivtools-mcp-prod`. To
+read it, you need access to the subscription. In the portal, open the workspace
+(or the Container App) and choose **Logs**, then switch the query editor to
+**KQL mode**. Logs take a minute or two to arrive.
+
+Every request, with its status code (health probes left out):
+
+```kusto
+ContainerAppConsoleLogs
+| where TimeGenerated > ago(1h)
+| where Log has "HTTP/1." and Log !has "/health"
+| project TimeGenerated, Log
+| order by TimeGenerated desc
+```
+
+The app's own log lines are JSON, with their fields under `record.extra`.
+Requests refused for a missing or wrong bearer token, with the names (not
+values) of the headers they carried:
+
+```kusto
+ContainerAppConsoleLogs
+| where TimeGenerated > ago(1h)
+| extend extra = parse_json(Log).record.extra
+| where extra.event == "auth_refused"
+| project TimeGenerated, method = tostring(extra.method), path = tostring(extra.path),
+    reason = tostring(extra.reason), headers = extra.headers
+| order by TimeGenerated desc
+```
+
+MCP tool calls: set `extra.event == "tool_call"` instead. Those lines hold the
+arguments and the start of each response, so they can include data that isn't
+public; don't copy them anywhere public.
+
+From the command line, pass any of these queries to:
+
+```bash
+az monitor log-analytics query --analytics-query '<query>' -o table \
+  -w "$(az monitor log-analytics workspace show --subscription <subscription id> \
+    -g rg-hivtools-mcp-prod -n log-hivtools-mcp-prod --query customerId -o tsv)"
+```
 
 ## Setting up as a new deployer
 

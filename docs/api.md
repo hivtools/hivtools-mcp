@@ -139,14 +139,14 @@ curl "http://127.0.0.1:8000/data?indicator=art_coverage&country=MWI,ZWE&sex=fema
 curl "http://127.0.0.1:8000/data?source=spectrum&indicator=plhiv&country=TZA&sex=both&age_group=Y000_999&columns=mean"
 
 # Female sex workers by district, from SHIPP (with auth on)
-curl -H "X-API-Key: $TOKEN" "http://127.0.0.1:8000/data?source=shipp&risk_group=sexpaid12m&indicator=population&country=TZA&area_level=4&sex=female&age_group=Y015_049"
+curl -H "Authorization: Bearer $TOKEN" "http://127.0.0.1:8000/data?source=shipp&risk_group=sexpaid12m&indicator=population&country=TZA&area_level=4&sex=female&age_group=Y015_049"
 ```
 
 ## Authentication
 
-When `HIVTOOLS_MCP_API_TOKEN` is set, every request needs the header
-`X-API-Key: <token>` - `/data`, `/search` and `/mcp` alike - and gets a `401`
-without it. `/`, `/version`, `/favicon.ico`, `/health`, `/health/ready` and the
+When `HIVTOOLS_MCP_API_TOKEN` is set, every request needs the standard bearer
+token header `Authorization: Bearer <token>` - `/data`, `/search` and `/mcp`
+alike - and gets a `401` without it. `/`, `/version`, `/favicon.ico`, `/health`, `/health/ready` and the
 OpenAPI schema and docs stay open. Locally the token is unset, so the API is
 open.
 
