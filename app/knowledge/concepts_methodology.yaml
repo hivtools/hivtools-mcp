@@ -1,0 +1,211 @@
+# Methodology layer: explains how the models work, not what they output.
+#
+# DRAFT - not yet wired in, and NOT yet reviewed. Needs a domain expert
+# (Rob G, or Rachel herself for the Naomi entry - she is a co-author of both
+# papers cited there) before it is trusted the way concepts_analysis.yaml and
+# concepts_outofscope.yaml are: those are checked against the real dataset by
+# tests/test_knowledge.py, but there is no data-driven way to verify a claim
+# about *how a model works* - only a domain expert can.
+#
+# DO NOT INFER. Every sentence in `explanation` must be a direct quote or a
+# close paraphrase of something actually read in one of the sources listed in
+# that entry's `sources` - a full document read directly (PDF, fetched page),
+# not a search-result snippet. Nothing may be added because it sounds
+# plausible or is commonly true of similar models: a claim not found in the
+# source is dropped, not filled in. If a plausible detail cannot be traced to
+# a source, leave a gap and flag it in `notes_for_review` rather than guess.
+#
+# Different shape from concepts_analysis.yaml deliberately: a methodology
+# question has no indicators to query - get_hiv_data cannot answer "how does
+# Naomi estimate prevalence?". Loaded into the search index with
+# field="methodology"; the model should read `explanation` and answer from
+# it directly, not pass anything to get_hiv_data.
+#
+# Schema:
+#   aliases            list[str]  alternate phrasings users actually type
+#   applies_to         str        naomi | spectrum | shipp
+#   explanation        str        the answer, written for the model to relay -
+#                                 sourced only, per the rule above
+#   sources            list[str]  exactly where each claim came from, and how
+#                                 thoroughly it was read (full text vs snippet)
+#   notes_for_review   str?       gaps this entry has, or things a reviewer
+#                                 should specifically check
+#   related            list[str]? concept ids in concepts_analysis.yaml this pairs with
+
+naomi_methodology:
+  label: How Naomi estimates district-level HIV indicators
+  aliases:
+    - how does naomi work
+    - how does naomi estimate prevalence
+    - how does naomi estimate ART coverage
+    - what data goes into naomi
+    - what indicators are important in estimating prevalence in naomi
+    - naomi methodology
+    - naomi model
+    - how are naomi estimates calculated
+    - where do naomi estimates come from
+  applies_to: naomi
+  explanation: >-
+    Naomi is a Bayesian small-area estimation model. It synthesizes data on
+    population, household surveys, ART service delivery and HIV testing of
+    pregnant women at antenatal clinics (ANC) to produce estimates and
+    probabilistic uncertainty ranges for HIV prevalence, ART coverage and the
+    HIV incidence rate, stratified by district, sex and age group. Model
+    inputs are six data sources: the area hierarchy; population by district,
+    sex and five-year age group; the most recent household survey (HIV
+    prevalence, ART coverage and recent HIV infection, by district, sex and
+    five-year age group); routine ANC testing data (ANC clients, number known
+    positive at first ANC, number already on ART prior to first ANC, number
+    tested for HIV, number tested positive, by district and year); ART
+    service delivery data (number receiving ART at health facilities each
+    quarter, split into children, adult women and adult men); and Spectrum
+    estimates exported from the national or first-administrative-level
+    Spectrum file by sex and single-year age - population size, PLHIV, number
+    on ART, new infections, age-specific fertility rate, HIV prevalence and
+    ART coverage among pregnant women, and number of PLHIV unaware of their
+    status (from the Shiny90 model). Estimation has two steps: first,
+    small-area regression models fit cross-sectional estimates at the time of
+    the most recent household survey, informed by ANC prevalence and prior
+    ART coverage for spatial variation, with the incidence rate modelled from
+    HIV transmission dynamics similar to the EPP model; second, the district
+    HIV population is projected forward to the current time in a single step
+    using the district's modelled new infections and Spectrum's survival
+    rates. Components not available at district level are taken from national
+    Spectrum estimates: transmission rates among untreated adults, age
+    distributions of new infections, survival of the HIV population by age
+    accounting for ART, and the ratio of paediatric to adult PLHIV.
+    Mother-to-child transmission is not itself modelled - the number of
+    children living with HIV is derived from the ratio of child to adult
+    female prevalence in Spectrum and the number of children on ART.
+    Awareness of status is modelled by applying the proportion unaware among
+    untreated PLHIV from the national Shiny90 model to the estimated
+    untreated population in each district, by sex and age. After fitting,
+    results may optionally be calibrated so the posterior mean of the
+    district-level estimates aligns to national or subnational Spectrum
+    totals for PLHIV, on ART, new infections and aware-of-status - by sex and
+    either coarse (under/over 15) or five-year age groups; this is not a hard
+    constraint, so district and Spectrum totals can still disagree. Naomi
+    produces three time points: the most recent household survey, the
+    current quarter, and a short-term projection nine months to a year
+    ahead - compared with Spectrum, which represents national trends since
+    the start of the epidemic with medium-range projections to 2030. In 2022,
+    Naomi was used by 37 countries with generalized HIV epidemics.
+  sources:
+    - >-
+      Eaton et al. 2021, "Naomi: a new modelling tool for estimating HIV
+      epidemic indicators at the district level in sub-Saharan Africa",
+      Journal of the International AIDS Society - read in full (pages 1-8,
+      including Box 1, Figure 1 and sections 2-2.3.1):
+      https://pmc.ncbi.nlm.nih.gov/articles/PMC8454682/ (local copy:
+      debug_agent_db/literature/JIA2-24-e25788.pdf in the n_ai_omi repo)
+    - >-
+      Esra et al. 2024, "Improved Indicators for Subnational Unmet
+      Antiretroviral Therapy Need in the Health System: Updates to the Naomi
+      Model in 2023", JAIDS 95(S1) - read in full (pages 1-3: abstract,
+      introduction, methods overview): local copy
+      debug_agent_db/literature/qai-95-e24.pdf in the n_ai_omi repo. Rachel
+      Esra is the lead author.
+  notes_for_review: >-
+    Both sources read in full this time (not search snippets), so confidence
+    is high. Not yet read: the rest of the 2023 update paper past page 3
+    (the new "PLHIV attending" / "untreated PLHIV attending" indicators and
+    the improved incidence projection method are visible on page 3 but not
+    fully summarised here), Appendix S1 of the 2021 paper (technical model
+    details), or either pptx file in the same literature folder
+    (2026_Naomi-methods-deep-dive.pptx, naomi-model-overview-and-2026-
+    updates-20-jan.pptx - not machine-readable by the tools available this
+    session; may have 2026-specific updates not reflected here).
+  related: [epidemic_size, acquisition_risk, treatment_coverage]
+
+spectrum_methodology:
+  label: How Spectrum/EPP estimates national HIV trends
+  aliases:
+    - how does spectrum work
+    - what data goes into spectrum
+    - spectrum methodology
+    - EPP methodology
+    - how are spectrum estimates calculated
+    - where do spectrum estimates come from
+    - how does spectrum project HIV
+  applies_to: spectrum
+  explanation: >-
+    Spectrum is an integrated demographic and HIV epidemic projection model
+    that estimates rates of HIV infection, disease progression and mortality
+    by sex and age since the start of the HIV epidemic, accounting for the
+    impact of ART and prevention of mother-to-child transmission programmes.
+    Its EPP (Estimation and Projection Package) component statistically
+    estimates HIV transmission rates throughout the epidemic to infer HIV
+    incidence trends from HIV prevalence data. Spectrum represents national
+    trends since the start of the epidemic, with medium-range projections to
+    2030.
+  sources:
+    - >-
+      Description sourced secondhand, from the Naomi paper's own background
+      section (not a Spectrum-focused paper), read in full: Eaton et al.
+      2021, Journal of the International AIDS Society, Introduction
+      (paragraph 2) and Esra et al. 2024, JAIDS, Methods (paragraph 1) - same
+      local files as naomi_methodology's sources.
+  notes_for_review: >-
+    Thin - this is everything found about Spectrum's own methodology in two
+    papers that are actually about Naomi, not Spectrum. No source read this
+    session describes what programme/surveillance/survey data specifically
+    feed into Spectrum, how EPP's fitting procedure works in detail, whether
+    it produces uncertainty intervals (the rest of this repo's own knowledge
+    files already state it does not, but that's this dataset's claim, not
+    something verified from Spectrum's own methodology documentation), or
+    Spectrum's age/sex disaggregation. A UNAIDS Spectrum manual PDF and a
+    JAIDS "Updates to the Spectrum model" article were attempted this session
+    and failed (corrupted PDF, paywalled article respectively) - before this
+    entry is trusted, someone with access to working Spectrum methodology
+    documentation (Rob G) should redo it properly.
+  related: [epidemic_trend, aids_mortality]
+
+shipp_methodology:
+  label: How SHIPP estimates key-population and behavioural risk-group indicators
+  aliases:
+    - how does SHIPP work
+    - what data goes into SHIPP
+    - SHIPP methodology
+    - how are SHIPP estimates calculated
+    - where do SHIPP estimates come from
+    - how are key population sizes estimated
+  applies_to: shipp
+  explanation: >-
+    SHIPP categorises the "denominator" for HIV prevention by sex, age,
+    geography and sexual behaviour. It builds on the Naomi small-area
+    estimation model, which produces subnational estimates of HIV prevalence
+    and incidence by age and sex at district level; these Naomi outputs are
+    the baseline HIV burden estimates SHIPP calculations use. It adds three
+    further models: an extended Howes et al. spatiotemporal multinomial model
+    analysing household survey data (DHS, PHIA, MICS) to estimate
+    district-level proportions across three behavioural categories (no sex,
+    one regular partner, or non-regular partner(s)); a Stevens et al. model
+    giving population size estimates for female sex workers (FSW), MSM and
+    PWID at regional level in sub-Saharan Africa; and a Nguyen et al. model
+    for age at sexual debut, plus national consensus estimates from UNAIDS
+    HIV estimates teams. The process has four steps: (1) disaggregate
+    regional key-population estimates to district/age level, using Gamma
+    distributions for FSW/MSM and a uniform distribution for PWID; (2)
+    separate general-population behavioural groups from key populations by
+    subtracting key-population proportions from the behavioural categories;
+    (3) estimate HIV prevalence by behaviour using HIV prevalence ratios
+    derived from household surveys and key-population data; (4) distribute
+    HIV incidence across behavioural groups using incidence rate ratios from
+    the literature (e.g. 1.72 relative risk for females aged 15-24 with a
+    non-regular partner, versus the reference category). SHIPP is now
+    integrated into the Naomi web application and is generated after
+    completing the Naomi model. Its own documentation describes its estimates
+    as "indicative rather than exact", given substantial uncertainty in
+    key-population size estimates, survey-based behavioural data, and
+    age/geographic disaggregation.
+  sources:
+    - "SHIPP tool overview, PrEPWatch (fetched and read in full): https://www.prepwatch.org/wp-content/uploads/2024/04/SHIPP-tool.html"
+  notes_for_review: >-
+    Fetched and read in full - the explanation above sticks closely to what
+    came back. Not yet checked: whether the "1.72" incidence rate ratio
+    example generalises or was just one example among several in the source
+    (only one was surfaced here). No local literature file for SHIPP was
+    found in debug_agent_db/literature, unlike Naomi - worth asking Rob G if
+    one exists, to replace this single secondary source with something
+    primary.
+  related: [key_populations, acquisition_risk]
