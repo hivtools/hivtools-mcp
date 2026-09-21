@@ -16,7 +16,7 @@ The same indicator ID from two sources is the same quantity estimated by two mod
 
 ## Dataset status
 
-What a country's figures are depends on the country. Every response's `meta.source` label (or `meta.sources`) says how they must be described — use that wording when quoting a number.
+What a country's figures are depends on the country. Every response's `meta.source` label (or `meta.sources`) says how they must be described — use that wording when quoting a number. Some countries are **synthetic demonstration data** (area names end "- Demo", area IDs end `_demo`): call those synthetic, never present them as real epidemiological facts about any country.
 
 ## Workflow — always
 
