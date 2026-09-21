@@ -20,15 +20,31 @@ auth like any other request. They authenticate with ``app.auth``'s per-process
 token, since fastmcp does not forward the caller's own ``Authorization`` header.
 """
 
+from typing import Any
+
 from fastapi import FastAPI
 from fastmcp import FastMCP
+from fastmcp.server.providers.openapi import OpenAPITool
 from fastmcp.server.providers.openapi.routing import MCPType, RouteMap
+from fastmcp.utilities.openapi import HTTPRoute
 
 from app.auth import internal_headers
 from app.knowledge.loader import instructions
 from app.observability import ToolCallLogger
 
 EXCLUDED_TAGS = ("health", "meta")
+
+# The names clients such as claude.ai display. Without them fastmcp title-cases
+# the tool name, which gives "Get Hiv Data".
+TOOL_TITLES = {
+    "get_hiv_data": "Get HIV Data",
+    "search_hiv_metadata": "Search HIV Metadata",
+}
+
+
+def _set_title(route: HTTPRoute, component: Any) -> None:
+    if isinstance(component, OpenAPITool) and route.operation_id in TOOL_TITLES:
+        component.title = TOOL_TITLES[route.operation_id]
 
 
 def build_mcp_app(api_app: FastAPI, *, name: str = "hivtools", path: str = "/mcp"):
@@ -37,6 +53,7 @@ def build_mcp_app(api_app: FastAPI, *, name: str = "hivtools", path: str = "/mcp
         app=api_app,
         name=name,
         route_maps=[RouteMap(tags={tag}, mcp_type=MCPType.EXCLUDE) for tag in EXCLUDED_TAGS],
+        mcp_component_fn=_set_title,
         httpx_client_kwargs={"headers": internal_headers()},
     )
     mcp.instructions = instructions()
