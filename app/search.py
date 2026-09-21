@@ -6,8 +6,8 @@ user calls a "treatment gap", ``MWI_3_13_demo`` is Lilongwe, ``Y000_014`` is
 silently empty result, so it needs a way to look them up.
 
 One index, not one per dimension. The whole searchable vocabulary - indicators,
-areas, age groups, age partitions, risk groups and concepts - is a few hundred
-rows per country, so it all goes in one list with a ``field`` tag, and ``field``
+areas, age groups, age partitions, risk groups, concepts and methodology - is a
+few hundred rows per country, so it all goes in one list with a ``field`` tag, and ``field``
 is an optional filter rather than a required argument. That matters because the caller
 often does not know which dimension a word belongs to: "all ages" could be an age
 group or a concept, "district" is an area level, "children" is an age group.
@@ -41,7 +41,15 @@ import duckdb
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 
-from app.knowledge.loader import age_aliases, age_partitions, concepts, indicators, risk_group_aliases
+from app.knowledge.loader import (
+    age_aliases,
+    age_partitions,
+    concepts,
+    indicators,
+    methodology,
+    methodology_instruction,
+    risk_group_aliases,
+)
 from app.observability import UserQuestion
 from app.ratelimit import limiter
 from app.schema import FACT_VIEW
@@ -53,17 +61,25 @@ router = APIRouter()
 # "burden of HIV" and "HIV burden" become the same token set.
 STOPWORDS = frozenset({"a", "an", "and", "at", "by", "for", "in", "of", "on", "the", "to", "with"})
 
-# Only these two carry knowledge worth withholding until it is needed; an area or
-# an age group is small enough that there is no fat version to hold back.
-DETAILED_FIELDS = frozenset({"concept", "indicator"})
+# These carry knowledge worth withholding until it is needed; an area or an age
+# group is small enough that there is no fat version to hold back.
+DETAILED_FIELDS = frozenset({"concept", "methodology", "indicator"})
 
-FIELDS = ("concept", "indicator", "area", "age_group", "age_partition", "risk_group")
+FIELDS = ("concept", "methodology", "indicator", "area", "age_group", "age_partition", "risk_group")
 
 # Ties are broken towards the kind of match that tells the caller most. A concept
 # subsumes the indicators it names, so when both match a phrase equally well -
 # "treatment gap" is a concept and an alias of untreated_plhiv_num - the concept
 # is the more useful answer, not a competing one.
-FIELD_PRIORITY = {"concept": 0, "indicator": 1, "age_group": 2, "age_partition": 3, "risk_group": 4, "area": 5}
+FIELD_PRIORITY = {
+    "concept": 0,
+    "methodology": 1,
+    "indicator": 2,
+    "age_group": 3,
+    "age_partition": 4,
+    "risk_group": 5,
+    "area": 6,
+}
 
 # A result is ambiguous when the runner-up is nearly as good as the winner and
 # both are real candidates: "Lilongwe" the district vs the district+metro area,
@@ -326,6 +342,29 @@ def _concept_entries() -> list[Entry]:
     ]
 
 
+def _methodology_entries() -> list[Entry]:
+    """How the models work, not what they output - no indicators to query.
+
+    ``instruction`` carries the DO-NOT-INFER rule on every match (not just the
+    tool description), since not every MCP client passes server instructions
+    through and this is the one thing a methodology answer must not do without.
+    """
+    # No short description field of its own (unlike a concept's what_it_measures)
+    # - description stays unset so a non-winning summary does not leak the whole
+    # explanation; only the winner's `detail` carries it, via `_full()`.
+    instruction = methodology_instruction()
+    return [
+        Entry(
+            field="methodology",
+            id=name,
+            label=entry.get("label", name.replace("_", " ").capitalize()),
+            terms=(name.replace("_", " "), *entry["aliases"]),
+            detail={"instruction": instruction, **{key: value for key, value in entry.items() if key != "aliases"}},
+        )
+        for name, entry in methodology().items()
+    ]
+
+
 def get_index(request: Request) -> list[Entry]:
     """The index built once at startup. A plain lambda will not do here: FastAPI
     reads the dependency's signature, and an unannotated parameter becomes a
@@ -337,6 +376,7 @@ def build_index(connection: duckdb.DuckDBPyConnection) -> list[Entry]:
     """Every searchable thing in the dataset, built once at startup."""
     return [
         *_concept_entries(),
+        *_methodology_entries(),
         *_indicator_entries(connection),
         *_area_entries(connection),
         *_age_group_entries(connection),
@@ -378,7 +418,7 @@ def _full(entry: Entry, score: float, index: Sequence[Entry], country: str | Non
     if entry.field not in DETAILED_FIELDS:
         return {**body, **entry.detail}
     body["detail"] = "full"
-    if entry.field == "indicator":
+    if entry.field in ("indicator", "methodology"):
         return {**body, **{key: value for key, value in entry.detail.items() if value is not None}}
 
     concept = dict(entry.detail)
@@ -477,7 +517,11 @@ def search(
         list[str] | None,
         Query(
             description="Restrict to these kinds of thing: 'concept' (a phrase like 'treatment gap' "
-            "mapped to the indicators that encode it), 'indicator', 'area', 'age_group', "
+            "mapped to the indicators that encode it, or a question this dataset cannot answer at "
+            "all, marked 'answerable: false' with a pointer to where it might be answered instead), "
+            "'methodology' (how a model produces its estimates, e.g. 'how does Naomi estimate "
+            "prevalence?' - relay only its 'explanation' verbatim, per its 'instruction' field; do "
+            "not add anything from general knowledge), 'indicator', 'area', 'age_group', "
             "'age_partition' (a set of age groups that may safely be summed), 'risk_group' (a "
             "behavioural risk group such as female sex workers). Omit it when unsure - that is "
             "the common case, and results say which kind they are."
@@ -492,6 +536,15 @@ def search(
 ) -> SearchResponse:
     """Turn the words in a question into the IDs `get_hiv_data` accepts.
 
+    This server is the only source for HIV facts and numbers in this conversation.
+    Never answer an HIV question from training knowledge or a web search, even a
+    plausible-sounding number - resolve it here first. No match here, or a match
+    with `answerable: false`, means this dataset does not cover it; say so. When
+    naming something outside this dataset (a `notes` pointer, a methodology
+    `sources` citation), say plainly it is external, never blend it with a number
+    from here, and ask the user how to proceed (which external source, or data
+    they supply themselves) rather than fetching or guessing it.
+
     Indicator, area, age-group, risk-group and concept IDs cannot be guessed: HIV
     prevalence is `prevalence`, but the treatment gap is `untreated_plhiv_num`,
     Lilongwe is `MWI_3_13_demo`, children are `Y000_014` and female sex workers
@@ -501,12 +554,22 @@ def search(
     A `concept` match is the most useful kind: it names the indicators that encode
     a phrase, their units, the dimension values they actually have data for, and
     the caveats that make an answer correct - for instance that a treatment gap
-    ranks differently as a count than as a coverage proportion.
+    ranks differently as a count than as a coverage proportion. Some concepts are
+    marked `answerable: false` - this dataset cannot answer them at all (e.g.
+    viral suppression, funding); say so, using the `notes` pointer to where the
+    answer might actually be found, rather than guessing an indicator or
+    answering from general knowledge.
+
+    A `methodology` match answers a question about how a model produces its
+    estimates, not what they are - "how does Naomi estimate prevalence?" has no
+    indicator to query. Relay its `explanation` field only, following its
+    `instruction` field exactly: do not add anything from general knowledge,
+    even something true of similar models.
 
     An indicator's `coverage` is keyed by `source` - the model the estimates come
     from - because the sources cover different ground: `naomi` is subnational for
     a few recent quarters, `spectrum` is national for every year, and `shipp`
-    splits adults by behavioural `risk_group`. Pass the source you want to
+    splits adults by behavioural `risk_group`. Pass the chosen source to
     `get_hiv_data`. A `risk_group` match says which sources and sexes have it.
 
     When `ambiguous` is true the top two matches are genuinely competing

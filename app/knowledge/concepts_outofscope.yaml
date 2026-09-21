@@ -1,0 +1,152 @@
+# Out-of-scope layer: catches questions this dataset genuinely cannot answer,
+# so the model declines with a reason and a pointer instead of guessing an
+# indicator that doesn't exist or answering from general knowledge.
+#
+# Wired in and reviewed by Rachel (2026-09-18): notes simplified, pointers
+# checked/added.
+#
+# Same schema as concepts_analysis.yaml (merges into the same field="concept"
+# search index at load time - see loader.py), but every entry here has
+# `answerable: false` and an empty `indicators` list: nothing to query,
+# because there is nothing in the data. Two entries (mother_to_child_
+# transmission, viral_suppression) note Spectrum may have this once
+# data-prep is extended (see TODO.md, "Ask Rob G") - if that happens, they
+# move to concepts_analysis.yaml and stop being out of scope.
+#
+# Schema: see concepts_analysis.yaml's header comment.
+
+viral_suppression:
+  label: Viral suppression / viral load
+  aliases:
+    - viral suppression
+    - viral load
+    - undetectable
+    - virally suppressed
+    - third 95
+    - suppressed viral load
+  what_it_measures: The proportion of people on ART whose HIV viral load is suppressed below a detectable threshold.
+  indicators: []
+  notes: >-
+    Exist in Spectrum at the national level - to be added in next version.
+  related: [treatment_cascade]
+  answerable: false
+
+mother_to_child_transmission:
+  label: Mother-to-child / vertical transmission
+  aliases:
+    - MTCT
+    - mother to child transmission
+    - vertical transmission
+    - infant HIV
+    - babies born with HIV
+    - infant outcomes
+  what_it_measures: HIV transmission from mother to child during pregnancy, birth or breastfeeding, and infant HIV outcomes.
+  indicators: []
+  notes: >-
+    Exist in Spectrum at the national level - to be added in next version.
+  related: [antenatal_care]
+  answerable: false
+
+prevention_methods:
+  label: Prevention methods (PEP, VMMC, condoms)
+  aliases:
+    - PEP
+    - post-exposure prophylaxis
+    - VMMC
+    - voluntary medical male circumcision
+    - circumcision
+    - condom use
+    - condom coverage
+    - harm reduction
+  what_it_measures: Coverage or uptake of biomedical or behavioural HIV prevention methods (excluding PrEP - see prep_coverage).
+  indicators: []
+  notes: >-
+    Exist in Goals at the national level - to be added in next version.
+  related: [key_populations, prevention_priority, prep_coverage]
+  answerable: false
+
+prep_coverage:
+  label: PrEP coverage (including long-acting PrEP)
+  aliases:
+    - PrEP
+    - pre-exposure prophylaxis
+    - PrEP coverage
+    - PrEP uptake
+    - oral PrEP
+    - long-acting PrEP
+    - LA-PrEP
+    - LEN
+    - lenacapavir
+    - Yeztugo
+    - Sunlenca
+    - CAB-LA
+    - cabotegravir
+  what_it_measures: Coverage or uptake of pre-exposure prophylaxis (PrEP), including newer long-acting injectable forms such as lenacapavir and cabotegravir.
+  indicators: []
+  notes: >-
+    No PrEP coverage data available in this dataset - exists in the Goals
+    model, not in Naomi/Spectrum/SHIPP, to be added in a future version.
+    SHIPP incidence by risk group can inform PrEP strategy (where risk is
+    highest) even without coverage data - see key_populations,
+    prevention_priority.
+  related: [key_populations, prevention_priority, prevention_methods]
+  answerable: false
+
+tb_hiv_coinfection:
+  label: TB/HIV coinfection
+  aliases:
+    - TB
+    - tuberculosis
+    - TB/HIV coinfection
+    - TB and HIV
+  what_it_measures: Tuberculosis burden or treatment among people living with HIV.
+  indicators: []
+  notes: >-
+    Out of scope of HIV Tools models.
+    Point to: https://www.unaids.org/en/topic/tuberculosis
+  answerable: false
+
+funding_cost:
+  label: Funding, budget, cost-effectiveness
+  aliases:
+    - funding
+    - budget
+    - cost per patient
+    - cost-effectiveness
+    - programme cost
+    - financing
+  what_it_measures: Money spent on the HIV response, or the cost-effectiveness of programmes.
+  indicators: []
+  notes: >-
+    Exist in Goals at the national level - to be added in next version.
+  answerable: false
+
+stigma_discrimination:
+  label: Stigma, discrimination, legal and policy environment
+  aliases:
+    - stigma
+    - discrimination
+    - human rights
+    - legal environment
+    - criminalisation
+    - policy environment
+  what_it_measures: Social, legal or policy conditions affecting people living with or at risk of HIV.
+  indicators: []
+  notes: >-
+    Out of scope of HIV Tools models.
+    Point to: https://indicatorregistry.unaids.org/indicator/stigma-and-discrimination-experienced-people-living-hiv-community-settings
+  answerable: false
+
+general_mortality:
+  label: General (non-AIDS) mortality, life expectancy
+  aliases:
+    - life expectancy
+    - all-cause mortality
+    - general mortality
+    - overall death rate
+  what_it_measures: Death or life expectancy from any cause, not specifically AIDS-related.
+  indicators: []
+  notes: >-
+    Exist in Spectrum at the national level - to be added in next version.
+  related: [aids_mortality]
+  answerable: false

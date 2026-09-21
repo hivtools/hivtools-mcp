@@ -1,12 +1,21 @@
 """Reads the hand-authored knowledge files that sit alongside this module.
 
-Three YAML files plus a markdown document, all version-controlled and reviewable
+Five YAML files plus a markdown document, all version-controlled and reviewable
 by a domain expert. They hold what the model outputs do *not* carry:
 
-- ``instructions.md``  the dataset-wide semantic document, served as the MCP
-  server's ``instructions`` field so it reaches the model before any tool call.
-- ``concepts.yaml``    plain-language phrases ("treatment gap") mapped to the
-  indicators that encode them.
+- ``instructions.md``          the dataset-wide semantic document, served as the
+  MCP server's ``instructions`` field so it reaches the model before any tool call.
+- ``concepts_analysis.yaml``   plain-language analysis phrases ("treatment gap")
+  mapped to the indicators that encode them.
+- ``concepts_outofscope.yaml`` plain-language phrases for questions this dataset
+  cannot answer at all ("viral suppression", "TB", "funding") - same schema as
+  ``concepts_analysis.yaml`` (``answerable: false``, no indicators), merged into
+  the same ``concepts()`` dict and the same ``field="concept"`` search results,
+  so a decline is not a dead end - each carries a ``notes`` pointer to where the
+  answer might actually be found.
+- ``concepts_methodology.yaml`` questions about how the models work, not what
+  they output ("how does Naomi estimate prevalence?"). No indicators to query -
+  loaded separately as ``methodology()`` and served under ``field="methodology"``.
 - ``dimensions.yaml``  which age-group sets may safely be summed, and the
   plain-language names people use for age groups and risk groups. The age groups
   mix a partition with overlapping aggregates, and nothing in the source metadata
@@ -46,8 +55,44 @@ def _load_yaml(name: str) -> dict[str, Any]:
 
 
 def concepts() -> dict[str, Any]:
-    """Plain-language concept -> indicator mappings."""
-    return _load_yaml("concepts")
+    """Plain-language concept -> indicator mappings, plus out-of-scope guardrails.
+
+    Merges ``concepts_analysis.yaml`` (question -> indicators) and
+    ``concepts_outofscope.yaml`` (question -> decline + pointer, ``answerable:
+    false``) into one dict, since both share the same entry schema and both are
+    served under ``field="concept"`` - the caller should not have to know which
+    file a match came from.
+    """
+    analysis = _load_yaml("concepts_analysis")
+    out_of_scope = _load_yaml("concepts_outofscope")
+    overlap = set(analysis) & set(out_of_scope)
+    if overlap:
+        message = f"concept id(s) in both concepts_analysis.yaml and concepts_outofscope.yaml: {sorted(overlap)}"
+        raise ValueError(message)
+    return {**analysis, **out_of_scope}
+
+
+def _methodology_yaml() -> dict[str, Any]:
+    return _load_yaml("concepts_methodology")
+
+
+def methodology() -> dict[str, Any]:
+    """Model-methodology Q&A: how Naomi, Spectrum and SHIPP produce their estimates.
+
+    Excludes ``answering_instruction`` - that is a rule for the model, not a
+    searchable entry; get it from ``methodology_instruction()``.
+    """
+    return {key: value for key, value in _methodology_yaml().items() if key != "answering_instruction"}
+
+
+def methodology_instruction() -> str:
+    """The DO-NOT-INFER rule that must accompany every methodology answer.
+
+    Lives as data in concepts_methodology.yaml, not just a comment, because a
+    comment never reaches the model - this has to be read out of the file and
+    actually surfaced (in instructions.md and the search tool description).
+    """
+    return _methodology_yaml()["answering_instruction"]
 
 
 def dimensions() -> dict[str, Any]:

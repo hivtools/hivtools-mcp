@@ -223,3 +223,6 @@ data-prep/raw-data/*
 
 # demo dataset built from data-prep/raw-data for the container image (see Dockerfile)
 demo-data/
+
+# macOS
+.DS_Store
