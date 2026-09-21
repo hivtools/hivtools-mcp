@@ -218,7 +218,7 @@ needs Node.js 22.19 or later. It works against a local server or production:
    named `Authorization` whose value is `Bearer ` followed by the key.
    Click **Add**.
 1. Switch the server's toggle on to connect, then open **Tools**. You should see
-   **Search Hiv Metadata** (`search_hiv_metadata`) and **Get Hiv Data**
+   **Search HIV Metadata** (`search_hiv_metadata`) and **Get HIV Data**
    (`get_hiv_data`).
 1. Pick a tool, fill in its arguments and click **Execute Tool**. Arguments must
    be valid JSON, so put quotes around strings (`"MWI"`) and write lists like
