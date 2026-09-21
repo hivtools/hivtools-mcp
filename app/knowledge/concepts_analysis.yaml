@@ -1,4 +1,9 @@
-# Concept layer: maps plain-language phrases to indicators.
+# Concept layer: maps plain-language analysis questions to indicators.
+#
+# One of three concept files, all loaded by app/knowledge/loader.py:
+#   concepts_analysis.yaml     this file - question -> indicators to query
+#   concepts_outofscope.yaml   question -> decline + pointer, nothing to query
+#   concepts_methodology.yaml  question about how the models work, not their output
 #
 # Hand-authored. Field names follow the UNAIDS Indicator Registry
 # (https://indicatorregistry.unaids.org) so entries can later be backed by, or
@@ -28,11 +33,15 @@ treatment_gap:
     - gaps in treatment
     - treatment gaps
     - unmet treatment need
+    - unmet needs
     - untreated
     - not on treatment
     - not on ART
     - people who need treatment
+    - people who need ART
     - ART gap
+    - proportion not on ART
+    - proportion not on treatment
   what_it_measures: People living with HIV who are not currently receiving antiretroviral therapy.
   cascade_stage: second 95 (of those diagnosed, 95% on treatment)
   indicators:
@@ -49,11 +58,9 @@ treatment_gap:
     age_group: Y015_999
     sex: both
   notes: >-
-    The count form and the coverage form rank districts differently and both are
-    legitimate: a large district can have the biggest absolute gap while having
-    above-average coverage. Report both, or ask which the user wants. Use the
-    residents form (untreated_plhiv_num), not untreated_plhiv_attend, which is a
-    catchment measure and can be negative.
+    Count and coverage rank districts differently, and both are legitimate -
+    report both, or ask which the user wants. Use untreated_plhiv_num
+    (residents), not untreated_plhiv_attend (catchment, can be negative).
   related: [treatment_coverage, treatment_cascade, treatment_priority]
 
 hiv_burden:
@@ -68,6 +75,9 @@ hiv_burden:
     - worst affected
     - hardest hit
     - biggest HIV problem
+    - highest number of PLHIV
+    - most PLHIV
+    - highest concentration of PLHIV
   what_it_measures: How much HIV there is in a population - either as a count of people or as a rate.
   indicators:
     - id: plhiv
@@ -81,10 +91,9 @@ hiv_burden:
     age_group: Y015_049
     sex: both
   notes: >-
-    Ambiguous term - resolve it before answering. Count and rate give different
-    answers: a small district can have high prevalence but few PLHIV, and a large
-    urban district the reverse. If the user has not said which they mean, either
-    report both or ask. "Highest burden" most often means plhiv.
+    Ambiguous - resolve before answering. Count and rate can disagree: a small
+    district may have high prevalence but few PLHIV, a large one the reverse.
+    Report both or ask which the user means. "Highest burden" usually means plhiv.
   related: [epidemic_size, age_sex_burden, key_populations]
 
 prevention_priority:
@@ -99,6 +108,8 @@ prevention_priority:
     - which districts for prevention
     - new infections
     - where are people getting infected
+    - who is at the highest risk for HIV
+    - where are people at the highest risk for HIV
   what_it_measures: Where new HIV infections are occurring, and where the per-person risk of acquiring HIV is highest.
   indicators:
     - id: incidence
@@ -107,17 +118,22 @@ prevention_priority:
     - id: infections
       role: secondary
       note: Absolute number of new infections per year. Use for "where are the most infections".
+    - id: prevalence
+      role: secondary
+      note: Existing burden, not new risk - paired with incidence on the scatter below.
   default_disaggregation:
     source: naomi
     age_group: Y015_049
     sex: both
   notes: >-
-    "Prioritise prevention" translates to highest incidence (rate) or most
-    infections (count); these rank differently. Rate targets where individuals
-    are most at risk; count targets where the most infections could be averted.
-    Programme prioritisation usually wants both. Incidence is a
-    rate_per_person_year - 0.0018 is 1.8 per 1,000 per year. For prevention
-    by behavioural risk group (sex workers, MSM, PWID), see key_populations.
+    Incidence (rate) and infections (count) rank districts differently - rate
+    shows highest individual risk, count shows most infections averted. Programme
+    prioritisation usually wants both. Incidence is per person-year: 0.0018 =
+    1.8 per 1,000 a year. Incidence against prevalence is a third view: a
+    district with high incidence but comparatively low prevalence has a
+    fast-growing or early-stage epidemic there - worth flagging even if its
+    absolute burden (hiv_burden) is not yet the largest. For sex workers, MSM
+    or PWID, see key_populations.
   related: [acquisition_risk, hiv_burden, key_populations]
 
 treatment_priority:
@@ -129,6 +145,7 @@ treatment_priority:
     - where to expand treatment
     - increase treatment coverage
     - scale up ART
+    - scale of treatment coverage
     - ART priority
   what_it_measures: Where increasing ART coverage would reach the most untreated people living with HIV.
   cascade_stage: second 95
@@ -146,9 +163,9 @@ treatment_priority:
     age_group: Y015_999
     sex: both
   notes: >-
-    Usually means "high prevalence AND low ART coverage" - a two-indicator
-    question. Districts scoring badly on both are the clearest priorities; report
-    the combination rather than a single ranking, and note where they disagree.
+    Usually means high prevalence AND low ART coverage together - report the
+    combination, not a single ranking. Districts scoring badly on both are the
+    clearest priorities; note where the two disagree.
   related: [treatment_gap, treatment_coverage]
 
 treatment_coverage:
@@ -178,9 +195,9 @@ treatment_coverage:
     age_group: Y015_999
     sex: both
   notes: >-
-    art_current_residents and art_current differ substantially at district
-    level because patients cross boundaries for care. Use residents for
-    population questions, attending for facility workload questions.
+    art_current_residents and art_current differ at district level - patients
+    cross boundaries for care. Use residents for population questions,
+    attending for workload questions.
   related: [treatment_gap, treatment_cascade]
 
 awareness_of_status:
@@ -195,6 +212,7 @@ awareness_of_status:
     - first 95
     - testing gap
     - who knows they have HIV
+    - KOS
   what_it_measures: The proportion of people living with HIV who know they are HIV positive.
   cascade_stage: first 95 (95% of PLHIV know their status)
   indicators:
@@ -211,8 +229,8 @@ awareness_of_status:
     age_group: Y015_999
     sex: both
   notes: >-
-    This is the first 95. Use the _num (residents) forms rather than _attend,
-    which are catchment measures and can be negative.
+    First 95. Use the _num (residents) forms, not _attend (catchment, can be
+    negative).
   related: [treatment_cascade, treatment_gap]
 
 treatment_cascade:
@@ -226,6 +244,9 @@ treatment_cascade:
     - three 95s
     - UNAIDS targets
     - cascade of care
+    - progress across cascade
+    - 95 95 95 progress
+    - 95-95-95 progress
   what_it_measures: Progress through the UNAIDS 95-95-95 targets - diagnosed, on treatment, virally suppressed.
   indicators:
     - id: aware_plhiv_prop
@@ -241,12 +262,11 @@ treatment_cascade:
     age_group: Y015_999
     sex: both
   notes: >-
-    Only the first two 95s are available - this dataset has NO viral suppression
-    indicator, so the third 95 cannot be reported. Say so rather than omitting it
-    silently. Note also that UNAIDS publishes the cascade two ways: with a common
-    PLHIV denominator for all three stages, or with each stage denominated by the
-    previous stage's numerator. State which you are using. art_coverage here is
-    denominated by all PLHIV, not by those diagnosed.
+    Only the first two 95s exist - no viral suppression indicator, so say the
+    third is missing rather than omitting it silently. UNAIDS reports the
+    cascade two ways: each stage over total PLHIV, or each stage over the
+    previous stage's numerator - state which. Here art_coverage is over all
+    PLHIV, not just those diagnosed.
   related: [awareness_of_status, treatment_coverage, treatment_gap]
 
 acquisition_risk:
@@ -269,11 +289,10 @@ acquisition_risk:
     sex: [male, female]
     age_group: five_year_bands
   notes: >-
-    For age/sex risk questions, request sex=male and sex=female separately -
-    sex=both hides the large male/female difference that is the point of the
-    question. Naomi has no key-population (sex worker, MSM, PWID) breakdown;
-    where a country has SHIPP estimates, key_populations covers risk by
-    behaviour.
+    For age/sex risk, request sex=male and sex=female separately - sex=both
+    hides the male/female gap that's the point of the question. Naomi has no
+    key-population breakdown (sex workers, MSM, PWID); use key_populations
+    where SHIPP exists.
   related: [prevention_priority, age_sex_burden, key_populations]
 
 age_sex_burden:
@@ -300,10 +319,9 @@ age_sex_burden:
     sex: [male, female]
     age_group: five_year_bands
   notes: >-
-    Request a valid age partition (the 17 five-year bands) and sex=male/female
-    separately. Never sum all 33 age groups - they overlap and the total comes
-    out several times too high. plhiv peaks in middle age groups by count while
-    prevalence peaks later; say which you are showing.
+    Use the 17 five-year bands and sex=male/female separately. Never sum all 33
+    age groups - they overlap and inflate the total. plhiv peaks in middle age
+    by count; prevalence peaks later - say which is being shown.
   related: [hiv_burden, acquisition_risk]
 
 epidemic_size:
@@ -326,10 +344,16 @@ epidemic_size:
     age_group: Y000_999
     sex: both
   notes: >-
-    For a national total use area_level=0; do not sum districts and levels
-    together. Naomi gives the recent, subnational picture; for the national
-    number over many years use source=spectrum (see epidemic_trend). The two are
-    separate estimates of the same thing - pick one, never add them.
+    Use area_level=0 for a national total - never sum districts and levels
+    together. Naomi gives the recent subnational picture; for the number over
+    many years use source=spectrum (see epidemic_trend). Never report a value
+    as the sum of naomi's and spectrum's rows - pick one. That is a rule about
+    reporting, not a claim that the two are unrelated: Naomi takes several of
+    its own inputs directly from Spectrum (population, fertility, survival,
+    incidence rate ratios, awareness-of-status) and its district estimates may
+    optionally be calibrated to align with Spectrum's national totals - see
+    the naomi_vs_spectrum methodology entry. If asked how they relate, say
+    that, rather than describing them as two independent estimates.
   related: [hiv_burden, epidemic_trend]
 
 antenatal_care:
@@ -355,10 +379,9 @@ antenatal_care:
     source: naomi
     sex: female
   notes: >-
-    ANC indicators are female-only and use 12 age groups rather than 33. They
-    measure ANC attendees, who are not representative of the general female
-    population - do not present anc_prevalence as female prevalence. This dataset
-    has no vertical-transmission or infant-outcome indicator.
+    Female-only, 12 age groups not 33. Measures ANC attendees, not the general
+    female population - don't present anc_prevalence as female prevalence. No
+    vertical-transmission or infant-outcome indicator.
 
 epidemic_trend:
   label: Change in the epidemic over time
@@ -402,16 +425,27 @@ epidemic_trend:
     age_group: Y000_999
     sex: both
   notes: >-
-    Long-term trends come from Spectrum (source=spectrum): national only, one
-    value a year from 1970, for countries that have it - check coverage. Years
-    after the current one are projections, not estimates of what happened; say
-    so. Spectrum has no uncertainty intervals and no rate indicators: a rate
-    such as prevalence can be derived from the counts (plhiv / population), and
-    should be reported as derived. Naomi covers only a handful of recent
-    quarters: never fit a trend to those points and describe it as a 5-, 10- or
-    20-year change. Where a country has no Spectrum data, say that the data does
-    not cover the period asked about.
-  related: [epidemic_size, aids_mortality, hiv_burden]
+    Long-term change is Spectrum only (source=spectrum), never Naomi - Naomi's
+    few recent quarters cannot support a 5-, 10- or 20-year trend. Default to
+    rates, not counts, when the user hasn't said which: prevalence
+    (plhiv/population), ART coverage (art_current/plhiv), incidence
+    (infections/population) and the AIDS-mortality rate (aids_deaths/
+    population) - a rate says whether the epidemic is getting better or worse
+    per person, which a rising count alone does not (plhiv can rise for years
+    purely because ART keeps more people alive, even as risk falls). Show
+    counts instead only when the user specifically wants absolute numbers
+    (e.g. "how many people" rather than "how has it changed"). None of the
+    four rates are native to Spectrum - actually fetch plhiv, population,
+    art_current, infections and aids_deaths and compute each rate per period;
+    do not just describe that deriving it is possible without doing the
+    arithmetic. Do this silently: state the rate as a fact, don't narrate
+    the fetch-and-divide steps or caveat every figure with how it was
+    calculated - that belongs in a footnote at most, and only in full if the
+    user asks how a number was worked out or questions a figure. Years after
+    the current one are projections, not observed data - say so briefly, not
+    as a lengthy caveat. Also disaggregated by age and sex - see
+    age_sex_burden for burden-by-age-over-time.
+  related: [epidemic_size, aids_mortality, hiv_burden, age_sex_burden]
 
 aids_mortality:
   label: AIDS deaths
@@ -438,10 +472,9 @@ aids_mortality:
     age_group: Y000_999
     sex: both
   notes: >-
-    National only, from Spectrum, for countries that have it - check coverage.
-    Naomi does not estimate deaths, so there is no subnational figure; say so if
-    asked for one. This is a count of deaths in a calendar year, not a rate.
-    Years after the current one are projections.
+    National only, from Spectrum - check coverage. Naomi has no deaths estimate,
+    so there's no subnational figure; say so if asked. A count for the calendar
+    year, not a rate. Years after the current one are projections.
   related: [epidemic_trend, epidemic_size]
 
 key_populations:
@@ -486,16 +519,13 @@ key_populations:
     age_group: Y015_049
     sex: [female, male]
   notes: >-
-    Only for countries with SHIPP estimates (source=shipp) - check coverage;
-    Naomi and Spectrum have no risk-group breakdown. SHIPP covers adults 15-49
-    for a single quarter: that of the Naomi round it was built from, which is
-    often older than the Naomi estimates served, so its totals will not match
-    Naomi's and must not be combined with them. The groups differ by sex:
-    female sex workers (sexpaid12m) are women only; MSM and PWID are men only;
-    no sex, one cohabiting partner and non-regular partner(s) exist for both.
-    Within one sex the groups are mutually exclusive and add up to the whole
-    population, so they can be summed; under sex=both, the single-sex groups
-    carry that sex's figures. Omit risk_group to get every group. Group sizes
-    are modelled, not counted, and have no uncertainty intervals. A small group
-    can have very high incidence but few infections - report both.
+    Only for countries with SHIPP estimates (source=shipp) - Naomi and Spectrum
+    have no risk-group breakdown. SHIPP is adults 15-49, one quarter, often
+    older than Naomi's - totals won't match and must not be combined. Groups
+    differ by sex: sexpaid12m (sex workers) is women only; msm and pwid are men
+    only; the rest exist for both. Within one sex, groups are mutually exclusive
+    and sum to the whole population; under sex=both, single-sex groups carry
+    that sex's figures. Omit risk_group for every group. Sizes are modelled,
+    not counted, with no uncertainty intervals. A small group can have high
+    incidence but few infections - report both.
   related: [acquisition_risk, prevention_priority]

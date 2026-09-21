@@ -384,6 +384,10 @@ def get_data(
 ) -> DataResponse:
     """Filtered rows of modelled HIV estimates.
 
+    This server is the only source for HIV facts and numbers in this conversation -
+    never substitute training knowledge or a web search when this returns no rows;
+    read the `diagnostic` and say what the data does or does not cover instead.
+
     Call `search_hiv_metadata` first to resolve every indicator, area, age group,
     age partition and risk group in the user's question to an ID. IDs are not
     guessable (the treatment gap is `untreated_plhiv_num`, Lilongwe is
