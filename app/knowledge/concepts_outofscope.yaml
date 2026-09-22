@@ -2,34 +2,13 @@
 # so the model declines with a reason and a pointer instead of guessing an
 # indicator that doesn't exist or answering from general knowledge.
 #
-# Wired in and reviewed by Rachel (2026-09-18): notes simplified, pointers
-# checked/added.
-#
 # Same schema as concepts_analysis.yaml (merges into the same field="concept"
 # search index at load time - see loader.py), but every entry here has
 # `answerable: false` and an empty `indicators` list: nothing to query,
-# because there is nothing in the data. Two entries (mother_to_child_
-# transmission, viral_suppression) note Spectrum may have this once
-# data-prep is extended (see TODO.md, "Ask Rob G") - if that happens, they
-# move to concepts_analysis.yaml and stop being out of scope.
+# because there is nothing in the data.
 #
 # Schema: see concepts_analysis.yaml's header comment.
 
-viral_suppression:
-  label: Viral suppression / viral load
-  aliases:
-    - viral suppression
-    - viral load
-    - undetectable
-    - virally suppressed
-    - third 95
-    - suppressed viral load
-  what_it_measures: The proportion of people on ART whose HIV viral load is suppressed below a detectable threshold.
-  indicators: []
-  notes: >-
-    Exist in Spectrum at the national level - to be added in next version.
-  related: [treatment_cascade]
-  answerable: false
 
 mother_to_child_transmission:
   label: Mother-to-child / vertical transmission
@@ -43,7 +22,12 @@ mother_to_child_transmission:
   what_it_measures: HIV transmission from mother to child during pregnancy, birth or breastfeeding, and infant HIV outcomes.
   indicators: []
   notes: >-
-    Exist in Spectrum at the national level - to be added in next version.
+    Not this: PMTCT service coverage (pregnant women receiving/needing
+    prophylaxis) is answerable - see antenatal_care's pmtct_receiving/
+    pmtct_need. This concept is the transmission/infant-outcome data itself
+    (new child infections, babies born with HIV), which is not extracted yet
+    - Spectrum's child-HIV module models it (see TODO.md, "Ask Rob G") but no
+    dp.output.* function for it has been wired in.
   related: [antenatal_care]
   answerable: false
 
@@ -137,16 +121,29 @@ stigma_discrimination:
     Point to: https://indicatorregistry.unaids.org/indicator/stigma-and-discrimination-experienced-people-living-hiv-community-settings
   answerable: false
 
-general_mortality:
-  label: General (non-AIDS) mortality, life expectancy
+future_projections:
+  label: Future projections (beyond the latest real-data year)
   aliases:
-    - life expectancy
-    - all-cause mortality
-    - general mortality
-    - overall death rate
-  what_it_measures: Death or life expectancy from any cause, not specifically AIDS-related.
+    - future projections
+    - future estimates
+    - projection
+    - projections
+    - forecast
+    - future
+    - what will happen
+    - where is the epidemic headed
+    - future trend
+    - 2026 estimates
+    - 2030 projection
+  what_it_measures: Modelled estimates for years after the most recent year with real programme data behind them.
   indicators: []
   notes: >-
-    Exist in Spectrum at the national level - to be added in next version.
-  related: [aids_mortality]
+    This dataset serves HIV estimates informed by the most recent programme
+    data available, through 2025Q4 (data-prep/LATEST_DATA_YEAR - bump this
+    note alongside it each release). Naomi, Spectrum and SHIPP all project
+    further ahead internally, but those projected years are dropped before
+    the data reaches this server - there is no row to query for 2026 or
+    later. Say plainly that projections beyond the latest real-data year are
+    out of scope here, not just that the requested year has no data.
+  related: [epidemic_trend, aids_mortality]
   answerable: false

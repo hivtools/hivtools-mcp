@@ -48,6 +48,7 @@ from app.knowledge.loader import (
     indicators,
     methodology,
     methodology_instruction,
+    reporting_instruction,
     risk_group_aliases,
 )
 from app.observability import UserQuestion
@@ -329,6 +330,15 @@ def _partition_entries() -> list[Entry]:
 
 
 def _concept_entries() -> list[Entry]:
+    """Plain-language analysis and out-of-scope questions, as one field="concept" index.
+
+    ``instruction`` carries the plotting/summary-format rule on every answerable
+    match (not just the tool description), since not every MCP client passes
+    server instructions through and this is the one thing an answer must not be
+    without - the same reason methodology's ``answering_instruction`` is carried
+    this way. Out-of-scope concepts have nothing to plot, so they don't get it.
+    """
+    instruction = reporting_instruction()
     return [
         Entry(
             field="concept",
@@ -336,7 +346,10 @@ def _concept_entries() -> list[Entry]:
             label=concept.get("label", name.replace("_", " ").capitalize()),
             description=concept["what_it_measures"],
             terms=(name.replace("_", " "), *concept["aliases"]),
-            detail={key: value for key, value in concept.items() if key != "aliases"},
+            detail={
+                **({"instruction": instruction} if concept.get("answerable", True) else {}),
+                **{key: value for key, value in concept.items() if key != "aliases"},
+            },
         )
         for name, concept in concepts().items()
     ]

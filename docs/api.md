@@ -99,7 +99,7 @@ parameters combine with `AND`:
 | `area_id` | e.g. `MWI`, `MWI_1_1_demo` |
 | `sex` | `both`, `female`, `male` |
 | `age_group` | e.g. `Y015_049` |
-| `risk_group` | e.g. `sexpaid12m`, `msm`; `all` for Naomi and Spectrum rows |
+| `risk_group` | e.g. `sexpaid12m`, `male_key_pop`; `all` for Naomi and Spectrum rows |
 | `calendar_quarter` | e.g. `CY2024Q3` |
 | `indicator` | e.g. `prevalence`, `art_coverage` |
 

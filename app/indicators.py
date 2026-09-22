@@ -28,6 +28,7 @@ parameter, never string-formatted into the SQL.
 
 import math
 from collections.abc import Sequence
+from functools import cache
 from typing import Annotated, Any
 
 import duckdb
@@ -36,7 +37,7 @@ from pydantic import BaseModel, Field
 
 from app.database import VIEW_NAME, get_cursor, get_manifest
 from app.diagnostics import diagnose
-from app.knowledge.loader import age_partitions
+from app.knowledge.loader import age_partitions, concepts, reporting_instruction
 from app.knowledge.loader import indicators as indicator_knowledge
 from app.observability import UserQuestion
 from app.query import count_rows, where_clause
@@ -220,6 +221,21 @@ def source_descriptions(manifest: dict[str, Any], country: str | None, source: s
     return found
 
 
+@cache
+def _concept_indicator_ids() -> frozenset[str]:
+    """Indicator ids referenced by an answerable concept - these carry the plotting instruction.
+
+    Out-of-scope concepts have nothing to query, so their (empty) indicator
+    lists never contribute here.
+    """
+    return frozenset(
+        entry["id"]
+        for concept in concepts().values()
+        if concept.get("answerable", True)
+        for entry in concept.get("indicators", [])
+    )
+
+
 def build_meta(
     cursor: duckdb.DuckDBPyConnection,
     constants: dict[str, Any],
@@ -291,8 +307,8 @@ def get_data(
         list[str] | None,
         Query(
             description="Model the estimates come from: 'naomi' (subnational, a few recent quarters, with "
-            "uncertainty intervals), 'spectrum' (national only, one value per year since 1970 - later years "
-            "are projections) or 'shipp' (adults 15-49 split by behavioural `risk_group`). An indicator from "
+            "uncertainty intervals), 'spectrum' (national only, one value per year since 1970 through the "
+            "latest year of real data) or 'shipp' (adults 15-49 split by behavioural `risk_group`). An indicator from "
             "two sources is the same quantity estimated by two models: pick one, never add them. Which "
             "sources an indicator has is in its coverage from `search_hiv_metadata`. ALWAYS tell "
             "the user what source the value is from."
@@ -327,7 +343,8 @@ def get_data(
     risk_group: Annotated[
         list[str] | None,
         Query(
-            description="Behavioural risk group, e.g. 'sexpaid12m' (female sex workers), 'msm' or 'pwid'. "
+            description="Behavioural risk group, e.g. 'sexpaid12m' (female sex workers) or 'male_key_pop' "
+            "(men who have sex with men or inject drugs). "
             "'all' is the whole population and the only value Naomi and Spectrum have; the rest come from "
             "source 'shipp'. Within one sex the groups do not overlap and add up to the whole population. "
             "Resolve names like 'sex workers' with `search_hiv_metadata`, which says which sexes have each."
@@ -401,9 +418,10 @@ def get_data(
 
     `source` is the model behind a row. `naomi` is subnational, for a few recent
     quarters, with uncertainty intervals. `spectrum` is national only, one value
-    per year from 1970 - use it for long-term trends, and say that future years
-    are projections. `shipp` splits adults 15-49 by behavioural `risk_group`
-    (female sex workers, MSM, PWID and others) for one year. Spectrum and SHIPP
+    per year from 1970 through the latest year of real data - use it for
+    long-term trends. `shipp` splits adults 15-49 by behavioural `risk_group`
+    (female sex workers, men who have sex with men or inject drugs, and others)
+    for one year. Spectrum and SHIPP
     give point estimates only. An indicator from two sources is two estimates of
     the same quantity: pass `source` to pick one, and never add rows from
     different sources together. Not every country has every source.
@@ -449,6 +467,11 @@ def get_data(
 
     constants = constant_dimensions(filters, rows, total)
     meta = build_meta(cursor, constants, rows, manifest)
+
+    requested = set(filters["indicator"] or [])
+    returned = {row["indicator"] for row in rows if "indicator" in row}
+    if (requested | returned) & _concept_indicator_ids():
+        meta["reporting_instruction"] = reporting_instruction()
     if age_partition is not None:
         partition = age_partitions()[age_partition]
         meta["age_partition"] = {

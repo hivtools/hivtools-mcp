@@ -31,6 +31,17 @@
 # Needs R >= 4.1 (native pipe) and the packages in the Makefile's R_PACKAGES;
 # every call is namespace-qualified, so nothing is attached.
 
+# The last year with real programme data behind it; every model in this
+# pipeline projects beyond it, and those projected years are dropped
+# wherever a source could carry them. Bumped once per release, in the one
+# file both this script and extract_indicators.py read it from, so the two
+# codebases can't drift out of sync on the cutoff.
+script_dir <- (function() {
+  file_arg <- grep("^--file=", commandArgs(trailingOnly = FALSE), value = TRUE)
+  if (length(file_arg) == 1) dirname(sub("^--file=", "", file_arg)) else "."
+})()
+LATEST_DATA_YEAR <- as.integer(readLines(file.path(script_dir, "LATEST_DATA_YEAR"), n = 1))
+
 FACT_COLUMNS <- c(
   "area_level", "area_id", "sex", "age_group", "calendar_quarter", "indicator",
   "mean", "se", "median", "mode", "lower", "upper",
@@ -43,6 +54,9 @@ FACT_COLUMNS <- c(
 # `all` is the whole population, and the only group Naomi and Spectrum have.
 # Within one sex, SHIPP's groups are mutually exclusive and add up to it: women
 # who sell sex are not also counted under non-regular partners, and so on.
+# The workbook reads MSM and PWID as separate male groups, but they are
+# combined into one `male_key_pop` group before the facts are built (see
+# `combine_male_key_pop()`), so only the combined id is listed here.
 RISK_GROUPS <- tibble::tribble(
   ~risk_group, ~risk_group_label, ~risk_group_sort_order,
   "all", "All", 0L,
@@ -50,8 +64,7 @@ RISK_GROUPS <- tibble::tribble(
   "sexcohab", "One cohabiting or marital partner", 2L,
   "sexnonreg", "Non-regular sexual partner(s)", 3L,
   "sexpaid12m", "Female sex workers", 4L,
-  "msm", "Men who have sex with men", 5L,
-  "pwid", "Men who inject drugs", 6L
+  "male_key_pop", "Men who have sex with men or inject drugs", 5L
 )
 
 # ---- shared -----------------------------------------------------------
@@ -71,6 +84,12 @@ read_naomi_meta <- function(naomi_zip) {
     indicator = read("meta_indicator.csv") |>
       dplyr::mutate(indicator_sort_order = as.integer(indicator_sort_order))
   )
+}
+
+# Drops rows dated after LATEST_DATA_YEAR - every model here projects beyond
+# it, and those years are not useful data (see LATEST_DATA_YEAR above).
+drop_future <- function(df) {
+  df |> dplyr::filter(as.integer(sub("^CY(\\d{4})Q\\d$", "\\1", calendar_quarter)) <= LATEST_DATA_YEAR)
 }
 
 period_rows <- function(year, quarter) {
@@ -149,19 +168,81 @@ write_source <- function(tables, country, source, out_dir) {
 
 # ---- Spectrum ---------------------------------------------------------
 
-# Core indicator set only. To add: ART initiations, PMTCT, child HIV.
+# Core indicator set only. To add: ART initiations, child HIV.
 SPECTRUM_INDICATORS <- list(
   population = SpectrumUtils::dp.output.bigpop,
   plhiv = SpectrumUtils::dp.output.hivpop,
   art_current = SpectrumUtils::dp.output.artpop,
   infections = SpectrumUtils::dp.output.incident.hiv,
-  aids_deaths = SpectrumUtils::dp.output.deaths.hiv
+  aids_deaths = SpectrumUtils::dp.output.deaths.hiv,
+  non_aids_deaths = SpectrumUtils::dp.output.deaths.nonhiv
 )
 
 SPECTRUM_NEW_INDICATORS <- tibble::tribble(
   ~indicator, ~indicator_label, ~description,
-  "aids_deaths", "AIDS deaths", "Number of AIDS-related deaths during the year"
+  "aids_deaths", "AIDS deaths", "Number of AIDS-related deaths during the year",
+  "non_aids_deaths", "Non-AIDS deaths", "Number of deaths from causes other than AIDS during the year",
+  "pmtct_receiving", "Receiving PMTCT", "Number of pregnant women receiving antiretroviral prophylaxis or treatment for PMTCT",
+  "pmtct_need", "In need of PMTCT", "Number of pregnant women in need of antiretroviral prophylaxis or treatment for PMTCT",
+  "vls_suppression_prop", "Viral suppression", "Proportion of those with a viral load test result who are virally suppressed"
 )
+
+# National totals reported against pregnant women (sex fixed at "female"), with
+# no age breakdown, so they are added to `facts` after the per-sex/age loop.
+SPECTRUM_PMTCT_INDICATORS <- list(
+  pmtct_receiving = SpectrumUtils::dp.output.pmtct,
+  pmtct_need = SpectrumUtils::dp.output.pmtct.need
+)
+
+read_spectrum_pmtct <- function(dp, first_year, final_year, national, quarter) {
+  dplyr::bind_rows(lapply(names(SPECTRUM_PMTCT_INDICATORS), function(indicator) {
+    SPECTRUM_PMTCT_INDICATORS[[indicator]](
+      dp, direction = "long", first.year = first_year, final.year = final_year
+    ) |>
+      dplyr::transmute(
+        indicator = indicator,
+        sex = "female",
+        age_group = "Y000_999",
+        area_id = national,
+        calendar_quarter = sprintf("CY%dQ%d", as.integer(Year), quarter),
+        risk_group = "all",
+        mean = Value
+      )
+  }))
+}
+
+# Reported by population group (children vs. adult men/women), not the
+# single-year ages used elsewhere, and as an input entered from survey/
+# routine data rather than a Spectrum-calculated output, so it is often NA in
+# years/countries where it wasn't entered. Emitted as a suppression
+# proportion, not the underlying tested/suppressed counts, so that programme
+# data volumes are not committed to the repo.
+read_spectrum_viral_suppression <- function(dp, first_year, final_year, national, quarter) {
+  pop_age <- c("Children 0-14" = "Y000_014", "Males 15+" = "Y015_999", "Females 15+" = "Y015_999")
+  pop_sex <- c("Children 0-14" = "both", "Males 15+" = "male", "Females 15+" = "female")
+  ind_map <- c("Number tested" = "tested", "Number virally suppressed" = "suppressed")
+
+  SpectrumUtils::dp.inputs.viral.suppression(
+    dp, direction = "long", first.year = first_year, final.year = final_year
+  ) |>
+    dplyr::transmute(
+      age_group = unname(pop_age[as.character(Population)]),
+      sex = unname(pop_sex[as.character(Population)]),
+      year = as.integer(Year),
+      quantity = unname(ind_map[as.character(Indicator)]),
+      value = Value
+    ) |>
+    tidyr::pivot_wider(names_from = quantity, values_from = value) |>
+    dplyr::transmute(
+      indicator = "vls_suppression_prop",
+      sex, age_group,
+      area_id = national,
+      calendar_quarter = sprintf("CY%dQ%d", year, quarter),
+      risk_group = "all",
+      mean = dplyr::if_else(!is.na(tested) & tested > 0, suppressed / tested, NA_real_)
+    ) |>
+    dplyr::filter(!is.na(mean))
+}
 
 # Spectrum's open-ended top age, which SpectrumUtils labels "80+".
 SPECTRUM_OPEN_AGE <- 80L
@@ -229,10 +310,19 @@ read_spectrum <- function(pjnz, meta) {
       area_id = national,
       calendar_quarter = sprintf("CY%dQ%d", year, quarter),
       risk_group = "all"
-    )
+    ) |>
+    dplyr::select(-year) |>
+    dplyr::bind_rows(
+      read_spectrum_pmtct(dp, first_year, final_year, national, quarter),
+      read_spectrum_viral_suppression(dp, first_year, final_year, national, quarter)
+    ) |>
+    drop_future()
 
-  periods <- period_rows(first_year:final_year, quarter)
-  indicators <- indicator_rows(names(SPECTRUM_INDICATORS), meta, SPECTRUM_NEW_INDICATORS)
+  periods <- period_rows(first_year:final_year, quarter) |> drop_future()
+  indicators <- indicator_rows(
+    c(names(SPECTRUM_INDICATORS), names(SPECTRUM_PMTCT_INDICATORS), "vls_suppression_prop"),
+    meta, SPECTRUM_NEW_INDICATORS
+  )
   list(
     facts = label_facts(facts, meta, periods, indicators),
     dim_period = periods,
@@ -361,6 +451,21 @@ area_ancestors <- function(areas) {
   pairs
 }
 
+# MSM and PWID are summed into one `male_key_pop` group (not averaged: the
+# counts add, the rates don't) before prevalence/incidence are derived, since
+# a man can belong to both groups and SHIPP's own groups are not meant to be
+# summed across once they stop being mutually exclusive.
+combine_male_key_pop <- function(counts) {
+  key_pop <- counts |>
+    dplyr::filter(risk_group %in% c("msm", "pwid")) |>
+    dplyr::group_by(area_id, age_group, sex) |>
+    dplyr::summarise(dplyr::across(dplyr::all_of(SHIPP_COUNTS), sum), .groups = "drop") |>
+    dplyr::mutate(risk_group = "male_key_pop")
+  counts |>
+    dplyr::filter(!risk_group %in% c("msm", "pwid")) |>
+    dplyr::bind_rows(key_pop)
+}
+
 read_shipp <- function(path, country, meta) {
   quarter <- shipp_quarter(path, country)
   bands <- shipp_age_groups(path, meta)
@@ -392,7 +497,8 @@ read_shipp <- function(path, country, meta) {
     dplyr::inner_join(age_map, by = "band", relationship = "many-to-many") |>
     dplyr::inner_join(area_ancestors(meta$area), by = "area_id", relationship = "many-to-many") |>
     dplyr::group_by(area_id = ancestor, age_group, sex, risk_group) |>
-    dplyr::summarise(dplyr::across(dplyr::all_of(SHIPP_COUNTS), sum), .groups = "drop")
+    dplyr::summarise(dplyr::across(dplyr::all_of(SHIPP_COUNTS), sum), .groups = "drop") |>
+    combine_male_key_pop()
 
   facts <- counts |>
     dplyr::mutate(

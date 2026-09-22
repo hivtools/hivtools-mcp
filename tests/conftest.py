@@ -219,8 +219,8 @@ FACT_ROWS = [
         1,
         1,
         "shipp",
-        "msm",
-        "Men who have sex with men",
+        "male_key_pop",
+        "Men who have sex with men or inject drugs",
         5,
     ),
 ]
@@ -283,8 +283,9 @@ DIMS: dict[str, tuple[str, list[tuple]]] = {
             ("TZA", "naomi", *ALL),
             ("TZA", "spectrum", *ALL),
             ("TZA", "shipp", "sexpaid12m", "Female sex workers", 4),
-            ("TZA", "shipp", "msm", "Men who have sex with men", 5),
-            ("TZA", "shipp", "pwid", "Men who inject drugs", 6),
+            ("TZA", "shipp", "male_key_pop", "Men who have sex with men or inject drugs", 5),
+            # No facts behind this one - tests that a risk group without rows is not offered.
+            ("TZA", "shipp", "sexnonreg", "Non-regular sexual partner(s)", 3),
         ],
     ),
 }

@@ -302,7 +302,7 @@ def test_risk_groups_vary_in_rows_with_their_labels(client: TestClient):
     body = client.get("/data", params={"country": "TZA", "source": "shipp", "columns": "mean"}).json()
     assert [(row["risk_group"], row["risk_group_label"]) for row in body["data"]] == [
         ("sexpaid12m", "Female sex workers"),
-        ("msm", "Men who have sex with men"),
+        ("male_key_pop", "Men who have sex with men or inject drugs"),
     ]
 
 

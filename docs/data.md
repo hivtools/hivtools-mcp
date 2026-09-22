@@ -6,8 +6,8 @@ Each row has a `source` saying which it came from:
 | `source` | Input | What it adds |
 | --- | --- | --- |
 | `naomi` | Naomi output zip | Subnational estimates for a few recent quarters, with uncertainty |
-| `spectrum` | Spectrum `.pjnz` | National estimates for every year since 1970, including projections |
-| `shipp` | SHIPP workbook `.xlsx` | Adults 15-49 split by behavioural `risk_group` (female sex workers, MSM, PWID, ...) |
+| `spectrum` | Spectrum `.pjnz` | National estimates for every year since 1970, through the latest year of real data |
+| `shipp` | SHIPP workbook `.xlsx` | Adults 15-49 split by behavioural `risk_group` (female sex workers, men who have sex with men or inject drugs, ...) |
 
 ## Building the dataset
 
@@ -93,8 +93,17 @@ way:
   and every area level above the districts are summed from them, and rates are
   recomputed from the sums. Its quarter is the Naomi round the workbook was built
   from, read from its "Model inputs" sheet. Within a sex its risk groups are
-  mutually exclusive and add up to the whole population; Naomi and Spectrum rows
-  have the single risk group `all`.
+  mutually exclusive and add up to the whole population, except MSM and PWID,
+  which are combined into one `male_key_pop` group (summed counts, then rates
+  recomputed from the sums - not averaged); Naomi and Spectrum rows have the
+  single risk group `all`.
+- **Naomi and Spectrum both project beyond the last year with real programme
+  data behind them.** Those projected years are dropped, not served: both
+  `extract_indicators.py` and `extract_spectrum_shipp.R` read the cutoff year
+  from [`data-prep/LATEST_DATA_YEAR`](https://github.com/hivtools/hivtools-mcp/blob/main/data-prep/LATEST_DATA_YEAR),
+  a single file so the two codebases can't disagree on it. Bump it once per
+  release as more real data becomes available; nothing downstream needs to
+  know about projected years, because they are never in the dataset.
 
 See `--help` for running the extractor directly.
 

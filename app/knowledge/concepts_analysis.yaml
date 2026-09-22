@@ -24,6 +24,22 @@
 #   notes                   str        traps, caveats, why indicators disagree
 #   related                 list[str]? other concept ids
 #   answerable              bool       false => the server cannot answer this at all
+#   plot                    str?       "type, what it shows" - a short default suggestion, not a
+#                                      spec: one line, no axes/colors/titles. The model should
+#                                      still override it when the question calls for something
+#                                      else. Only names chart types and data this server can
+#                                      actually back - never a map (no boundary/geojson data
+#                                      is exposed by this API).
+#
+
+reporting_instruction: >-
+  Always answer a question that matches this concept with a short,
+  high-level bullet-point summary of the headline figures plus 1-3 simple,
+  static inline charts - a single-panel artifact is the right tool for this
+  and is preferred, rendered directly, not generated as an image file to
+  hand over as a download. Do not write extended prose. Do not build a
+  multi-panel dashboard or add interactivity (filters, tooltips, toggles)
+  unless the user explicitly asks for one.
 
 treatment_gap:
   label: Treatment gap
@@ -43,6 +59,7 @@ treatment_gap:
     - proportion not on ART
     - proportion not on treatment
   what_it_measures: People living with HIV who are not currently receiving antiretroviral therapy.
+  plot: bar, top districts by untreated PLHIV count or by ART coverage
   cascade_stage: second 95 (of those diagnosed, 95% on treatment)
   indicators:
     - id: untreated_plhiv_num
@@ -79,6 +96,7 @@ hiv_burden:
     - most PLHIV
     - highest concentration of PLHIV
   what_it_measures: How much HIV there is in a population - either as a count of people or as a rate.
+  plot: bar, top districts by PLHIV or prevalence
   indicators:
     - id: plhiv
       role: primary
@@ -111,6 +129,7 @@ prevention_priority:
     - who is at the highest risk for HIV
     - where are people at the highest risk for HIV
   what_it_measures: Where new HIV infections are occurring, and where the per-person risk of acquiring HIV is highest.
+  plot: scatter, incidence vs prevalence by district
   indicators:
     - id: incidence
       role: primary
@@ -148,6 +167,7 @@ treatment_priority:
     - scale of treatment coverage
     - ART priority
   what_it_measures: Where increasing ART coverage would reach the most untreated people living with HIV.
+  plot: scatter, prevalence vs ART coverage by district
   cascade_stage: second 95
   indicators:
     - id: untreated_plhiv_num
@@ -179,6 +199,7 @@ treatment_coverage:
     - proportion on ART
     - how many on ART
   what_it_measures: The proportion of people living with HIV who are receiving antiretroviral therapy.
+  plot: bar, districts ranked by ART coverage
   cascade_stage: second 95
   indicators:
     - id: art_coverage
@@ -214,6 +235,7 @@ awareness_of_status:
     - who knows they have HIV
     - KOS
   what_it_measures: The proportion of people living with HIV who know they are HIV positive.
+  plot: bar, districts ranked by awareness proportion
   cascade_stage: first 95 (95% of PLHIV know their status)
   indicators:
     - id: aware_plhiv_prop
@@ -248,6 +270,7 @@ treatment_cascade:
     - 95 95 95 progress
     - 95-95-95 progress
   what_it_measures: Progress through the UNAIDS 95-95-95 targets - diagnosed, on treatment, virally suppressed.
+  plot: bar, the three 95 stages side by side as a cascade/funnel
   indicators:
     - id: aware_plhiv_prop
       role: primary
@@ -255,6 +278,12 @@ treatment_cascade:
     - id: art_coverage
       role: primary
       note: Second 95 - proportion of PLHIV on ART.
+    - id: vls_suppression_prop
+      role: primary
+      source: spectrum
+      note: >-
+        Third-95 proxy - proportion of those with a viral load test result
+        who are suppressed, not proportion of all PLHIV suppressed.
     - id: plhiv
       role: denominator
   default_disaggregation:
@@ -262,11 +291,16 @@ treatment_cascade:
     age_group: Y015_999
     sex: both
   notes: >-
-    Only the first two 95s exist - no viral suppression indicator, so say the
-    third is missing rather than omitting it silently. UNAIDS reports the
-    cascade two ways: each stage over total PLHIV, or each stage over the
-    previous stage's numerator - state which. Here art_coverage is over all
-    PLHIV, not just those diagnosed.
+    All three 95s exist, but not at the same disaggregation: aware_plhiv_prop
+    and art_coverage default to Naomi (subnational), vls_suppression_prop is
+    Spectrum, national only - report the third stage nationally even when the
+    first two are subnational, and say so rather than presenting all three as
+    one consistent geography. vls_suppression_prop's denominator is people
+    tested, not all PLHIV, so it is a proxy for the strict third-95 definition
+    (proportion of PLHIV suppressed), not an exact match - flag that if
+    precision matters. UNAIDS reports the cascade two ways: each stage over
+    total PLHIV, or each stage over the previous stage's numerator - state
+    which. Here art_coverage is over all PLHIV, not just those diagnosed.
   related: [awareness_of_status, treatment_coverage, treatment_gap]
 
 acquisition_risk:
@@ -278,6 +312,7 @@ acquisition_risk:
     - most at risk
     - vulnerable populations
   what_it_measures: Which age and sex groups face the highest per-person risk of acquiring HIV.
+  plot: grouped bar, incidence by age group split by sex
   indicators:
     - id: incidence
       role: primary
@@ -306,6 +341,7 @@ age_sex_burden:
     - which populations
     - demographic breakdown
   what_it_measures: How people living with HIV are distributed across age groups and sexes.
+  plot: grouped bar (or population pyramid), PLHIV by age group split by sex
   indicators:
     - id: plhiv
       role: primary
@@ -334,6 +370,7 @@ epidemic_size:
     - total infected
     - epidemic size
   what_it_measures: The number of people living with HIV.
+  plot: bar, top districts by PLHIV
   indicators:
     - id: plhiv
       role: primary
@@ -365,7 +402,8 @@ antenatal_care:
     - PMTCT
     - mother to child
     - maternal HIV
-  what_it_measures: HIV indicators among women attending their first antenatal care visit.
+  what_it_measures: HIV indicators among women attending their first antenatal care visit, and national PMTCT service coverage.
+  plot: bar, districts ranked by ANC prevalence or ANC ART coverage
   indicators:
     - id: anc_prevalence
       role: primary
@@ -375,13 +413,26 @@ antenatal_care:
       role: denominator
     - id: anc_plhiv
       role: secondary
+    - id: pmtct_receiving
+      role: secondary
+      source: spectrum
+      note: National total, not an ANC-attendee count - pregnant women receiving PMTCT prophylaxis or treatment.
+    - id: pmtct_need
+      role: secondary
+      source: spectrum
+      note: National total, not an ANC-attendee count - pregnant women in need of PMTCT.
   default_disaggregation:
     source: naomi
     sex: female
   notes: >-
     Female-only, 12 age groups not 33. Measures ANC attendees, not the general
-    female population - don't present anc_prevalence as female prevalence. No
-    vertical-transmission or infant-outcome indicator.
+    female population - don't present anc_prevalence as female prevalence.
+    `pmtct_receiving`/`pmtct_need` are a different basis from the anc_*
+    indicators - Spectrum national totals against all pregnant women, not
+    Naomi ANC-attendee counts - so don't combine them in one figure; PMTCT
+    coverage as a proportion (pmtct_receiving/pmtct_need) can be derived from
+    them if asked. No vertical-transmission or infant-outcome indicator -
+    that is genuinely out of scope, see mother_to_child_transmission.
 
 epidemic_trend:
   label: Change in the epidemic over time
@@ -396,9 +447,8 @@ epidemic_trend:
     - time series
     - epidemic trajectory
     - how has the epidemic changed
-    - projection
-    - future
   what_it_measures: How the epidemic has changed over time, nationally.
+  plot: line, key indicators (rates) over time
   indicators:
     - id: plhiv
       role: primary
@@ -441,9 +491,7 @@ epidemic_trend:
     arithmetic. Do this silently: state the rate as a fact, don't narrate
     the fetch-and-divide steps or caveat every figure with how it was
     calculated - that belongs in a footnote at most, and only in full if the
-    user asks how a number was worked out or questions a figure. Years after
-    the current one are projections, not observed data - say so briefly, not
-    as a lengthy caveat. Also disaggregated by age and sex - see
+    user asks how a number was worked out or questions a figure. Also disaggregated by age and sex - see
     age_sex_burden for burden-by-age-over-time.
   related: [epidemic_size, aids_mortality, hiv_burden, age_sex_burden]
 
@@ -474,8 +522,70 @@ aids_mortality:
   notes: >-
     National only, from Spectrum - check coverage. Naomi has no deaths estimate,
     so there's no subnational figure; say so if asked. A count for the calendar
-    year, not a rate. Years after the current one are projections.
-  related: [epidemic_trend, epidemic_size]
+    year, not a rate.
+  related: [epidemic_trend, epidemic_size, general_mortality]
+
+general_mortality:
+  label: Non-AIDS deaths
+  aliases:
+    - non-AIDS deaths
+    - other-cause mortality
+    - deaths not from AIDS
+    - general mortality
+    - all-cause mortality
+    - overall death rate
+  what_it_measures: The number of people who die of causes other than AIDS each year.
+  indicators:
+    - id: non_aids_deaths
+      role: primary
+      source: spectrum
+      note: Deaths from causes other than AIDS during the year, national.
+    - id: population
+      role: denominator
+      source: spectrum
+  default_disaggregation:
+    source: spectrum
+    area_level: 0
+    age_group: Y000_999
+    sex: both
+  notes: >-
+    National only, from Spectrum - check coverage. Naomi has no deaths
+    estimate, so there's no subnational figure; say so if asked. A count for
+    the calendar year, not a rate. No life-expectancy indicator - only a
+    death count, don't present it as one. All-cause mortality can be derived
+    by adding aids_deaths (see aids_mortality) to non_aids_deaths - state
+    that it's a derived sum if asked for "all deaths" or "total mortality".
+  related: [aids_mortality, epidemic_trend]
+
+viral_suppression:
+  label: Viral suppression / viral load
+  aliases:
+    - viral suppression
+    - viral load
+    - undetectable
+    - virally suppressed
+    - third 95
+    - suppressed viral load
+  what_it_measures: The proportion of people tested whose HIV viral load is suppressed below a detectable threshold.
+  indicators:
+    - id: vls_suppression_prop
+      role: primary
+      source: spectrum
+      note: Proportion of those with a viral load test result who are suppressed.
+  default_disaggregation:
+    source: spectrum
+    area_level: 0
+    sex: both
+  notes: >-
+    National only, from Spectrum, and only an input where a survey/programme
+    figure was entered for that year - many years and some countries will
+    have none; check coverage before assuming it exists. Reported by
+    population group, not the usual age groups: children 0-14 (sex both),
+    males 15+, females 15+ - no finer age breakdown exists. The denominator
+    is people tested, not all PLHIV, so this is a proxy for the strict UNAIDS
+    third-95 definition (proportion of PLHIV suppressed), not an exact match -
+    see treatment_cascade.
+  related: [treatment_cascade, aids_mortality]
 
 key_populations:
   label: Key and priority populations
@@ -522,10 +632,11 @@ key_populations:
     Only for countries with SHIPP estimates (source=shipp) - Naomi and Spectrum
     have no risk-group breakdown. SHIPP is adults 15-49, one quarter, often
     older than Naomi's - totals won't match and must not be combined. Groups
-    differ by sex: sexpaid12m (sex workers) is women only; msm and pwid are men
-    only; the rest exist for both. Within one sex, groups are mutually exclusive
-    and sum to the whole population; under sex=both, single-sex groups carry
-    that sex's figures. Omit risk_group for every group. Sizes are modelled,
-    not counted, with no uncertainty intervals. A small group can have high
-    incidence but few infections - report both.
+    differ by sex: sexpaid12m (sex workers) is women only; male_key_pop (men
+    who have sex with men and men who inject drugs, combined into one group)
+    is men only; the rest exist for both. Within one sex, groups are mutually
+    exclusive and sum to the whole population; under sex=both, single-sex
+    groups carry that sex's figures. Omit risk_group for every group. Sizes
+    are modelled, not counted, with no uncertainty intervals. A small group
+    can have high incidence but few infections - report both.
   related: [acquisition_risk, prevention_priority]

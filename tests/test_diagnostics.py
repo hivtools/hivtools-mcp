@@ -114,7 +114,7 @@ def test_unknown_risk_group_is_corrected_by_name(client: TestClient):
 
 
 def test_asking_the_wrong_source_for_a_risk_group_names_the_right_one(client: TestClient):
-    message = diagnostic(client, country="TZA", source="naomi", risk_group="msm", indicator="population")
+    message = diagnostic(client, country="TZA", source="naomi", risk_group="male_key_pop", indicator="population")
     assert "Dropping source" in message
     assert "source can be: shipp" in message
 

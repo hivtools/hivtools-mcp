@@ -21,6 +21,7 @@ prevalence:      {unit: proportion, basis: residents, aliases: [prevalence, HIV 
 incidence:       {unit: rate_per_person_year, basis: residents, aliases: [incidence, incidence rate, risk of infection, new infection rate]}
 infections:      {unit: count, basis: residents, aliases: [new infections, infections, annual infections]}
 aids_deaths:     {unit: count, basis: residents, aliases: [AIDS deaths, AIDS-related deaths, HIV deaths, HIV-related deaths, deaths, mortality]}
+non_aids_deaths: {unit: count, basis: residents, aliases: [non-AIDS deaths, deaths not from AIDS, other-cause mortality, general mortality, all-cause mortality]}
 
 art_coverage:          {unit: proportion, basis: residents, aliases: [ART coverage, treatment coverage, on treatment, proportion on ART]}
 art_current_residents: {unit: count, basis: residents, aliases: [number on ART, on treatment count, ART residents]}
@@ -45,3 +46,7 @@ anc_art_new:      {unit: count, basis: anc, aliases: [ART initiations at ANC, ne
 anc_known_pos:    {unit: count, basis: anc, aliases: [known positive at ANC]}
 anc_tested_pos:   {unit: count, basis: anc, aliases: [tested positive at ANC]}
 anc_tested_neg:   {unit: count, basis: anc, aliases: [tested negative at ANC]}
+
+pmtct_receiving:      {unit: count, basis: residents, aliases: [PMTCT, receiving PMTCT, on PMTCT, pregnant women receiving ART, PMTCT coverage]}
+pmtct_need:           {unit: count, basis: residents, aliases: [PMTCT need, pregnant women needing PMTCT, PMTCT eligible]}
+vls_suppression_prop: {unit: proportion, basis: residents, aliases: [viral suppression, virally suppressed, viral load suppression, VLS, suppression rate]}

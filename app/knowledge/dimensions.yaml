@@ -72,17 +72,19 @@ age_group:
 #
 # Within one sex the groups are mutually exclusive and add up to the whole
 # population, so summing them is safe. Which groups exist differs by sex: female
-# sex workers only in women, MSM and PWID only in men, the rest in both. For
-# sex=both each group is carried over from the sex(es) it exists in, so the six
-# groups add up to the both-sexes total too.
+# sex workers only in women, male_key_pop only in men, the rest in both. For
+# sex=both each group is carried over from the sex(es) it exists in, so the five
+# groups add up to the both-sexes total too. MSM and PWID are read from SHIPP
+# as separate columns but combined into one male_key_pop group before rates
+# are derived (extract_spectrum_shipp.R's combine_male_key_pop()) - they were
+# never queryable as separate risk_group IDs.
 #
 # Consumers:
 #   loader.risk_group_aliases()   reads `aliases`
 risk_group:
   aliases:
     sexpaid12m: [sex workers, female sex workers, FSW, women who sell sex, commercial sex workers, transactional sex]
-    msm: [MSM, men who have sex with men, gay men, gay and bisexual men]
-    pwid: [PWID, people who inject drugs, injecting drug users, IDU, men who inject drugs]
+    male_key_pop: [MSM, men who have sex with men, gay men, gay and bisexual men, PWID, people who inject drugs, injecting drug users, IDU, men who inject drugs]
     nosex12m: [not sexually active, no sex, sexually inactive, abstinent]
     sexcohab: [cohabiting, married, one regular partner, regular partner, marital partner, stable partner]
     sexnonreg: [non-regular partners, casual partners, multiple partners, non-regular partner]

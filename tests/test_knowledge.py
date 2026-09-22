@@ -32,7 +32,7 @@ BUILT = Path(os.environ.get("HIVTOOLS_MCP_NAOMI_DATA_DIR", ROOT / "data-prep" / 
 # Indicators Naomi does not produce, so the demo zip cannot vouch for them. Each
 # is added by data-prep/extract_spectrum_shipp.R; the built-dataset tests check
 # this list against what that actually writes.
-NON_NAOMI_INDICATORS = {"aids_deaths"}
+NON_NAOMI_INDICATORS = {"aids_deaths", "non_aids_deaths", "pmtct_receiving", "pmtct_need", "vls_suppression_prop"}
 
 # Reference slice used for every additivity check: one indicator, one quarter,
 # national, both sexes. Additivity is a property of the dimensions, so any
@@ -220,18 +220,25 @@ def test_latest_quarter_really_does_differ_by_indicator(db: duckdb.DuckDBPyConne
     assert len(latest) > 1
 
 
-def test_proportion_indicators_are_fractions_not_percentages(db: duckdb.DuckDBPyConnection):
-    """A proportion drifting outside 0-1 means the unit label is wrong by 100x."""
+def test_proportion_indicators_are_fractions_not_percentages(
+    db: duckdb.DuckDBPyConnection, dataset_indicators: set[str]
+):
+    """A proportion drifting outside 0-1 means the unit label is wrong by 100x.
+
+    Only checks indicators the demo zip actually has - non-Naomi indicators
+    (see NON_NAOMI_INDICATORS) are checked against the built dataset instead,
+    in test_units_hold_in_every_source.
+    """
     for name, spec in knowledge.indicators().items():
-        if spec["unit"] != "proportion":
+        if spec["unit"] != "proportion" or name not in dataset_indicators:
             continue
         low, high = row(db, "SELECT min(mean), max(mean) FROM ind WHERE indicator=?", [name])
         assert 0 <= low <= 1 and 0 <= high <= 1, f"{name} spans {low}-{high}, not a 0-1 proportion"
 
 
-def test_rate_indicators_are_per_person_year(db: duckdb.DuckDBPyConnection):
+def test_rate_indicators_are_per_person_year(db: duckdb.DuckDBPyConnection, dataset_indicators: set[str]):
     for name, spec in knowledge.indicators().items():
-        if spec["unit"] != "rate_per_person_year":
+        if spec["unit"] != "rate_per_person_year" or name not in dataset_indicators:
             continue
         high = scalar(db, "SELECT max(mean) FROM ind WHERE indicator=?", [name])
         assert 0 <= high < 1, f"{name} peaks at {high}; a per-person-year rate should be well under 1"
@@ -319,7 +326,7 @@ def test_risk_groups_add_up_across_sexes(built: duckdb.DuckDBPyConnection):
 
 
 def test_single_sex_risk_groups_are_in_one_sex_only(built: duckdb.DuckDBPyConnection):
-    """The knowledge files say female sex workers are women and MSM and PWID men."""
+    """The knowledge files say female sex workers are women and male_key_pop (MSM/PWID) men."""
     sexes = dict(
         built.sql("""
             SELECT risk_group, list_sort(list_distinct(list(sex))) FROM facts
@@ -327,12 +334,14 @@ def test_single_sex_risk_groups_are_in_one_sex_only(built: duckdb.DuckDBPyConnec
         """).fetchall()
     )
     assert sexes["sexpaid12m"] == ["both", "female"]
-    assert sexes["msm"] == sexes["pwid"] == ["both", "male"]
+    assert sexes["male_key_pop"] == ["both", "male"]
     for shared in ("nosex12m", "sexcohab", "sexnonreg"):
         assert sexes[shared] == ["both", "female", "male"]
 
 
-@pytest.mark.parametrize(("source", "risk_group"), [("spectrum", "all"), ("shipp", "sexcohab"), ("shipp", "msm")])
+@pytest.mark.parametrize(
+    ("source", "risk_group"), [("spectrum", "all"), ("shipp", "sexcohab"), ("shipp", "male_key_pop")]
+)
 def test_derived_sources_keep_the_additivity_rules(built: duckdb.DuckDBPyConnection, source: str, risk_group: str):
     """The Naomi rules - sex, area level, age partitions - hold for the sources data-prep aggregates."""
     indicator = "plhiv"

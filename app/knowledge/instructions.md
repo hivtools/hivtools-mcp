@@ -8,8 +8,8 @@ Each row has a `source`:
 
 | `source` | Area Level | Time Periods | Population | Uncertainty |
 |---|---|---|---|---|
-| `Naomi` | Hierarchical down to the subnational level | Cross sectional: Year of last survey, most recent year, 2 step future projections | General by age and sex | `lower`–`upper` interval |
-| `Spectrum` | National | Longitudinal: From 1970 to recent year, projections post 2025 | General by age and sex | none |
+| `Naomi` | Hierarchical down to the subnational level | Cross sectional: Year of last survey, most recent year | General by age and sex | `lower`–`upper` interval |
+| `Spectrum` | National | Longitudinal: from 1970 through the latest year of real data | General by age and sex | none |
 | `SHIPP` | Hierarchical down to the subnational level | Cross sectional: most recent year only | Risk behaviour by age and sex | none |
 
 The same indicator ID from two sources is the same quantity estimated by two models: pass `source` to choose one, and **never add rows from different sources together**. Use `Spectrum` for longitudinal, national trends, `Naomi` for subnational trends and `SHIPP` for questions on HIV risk and priority populations.
@@ -46,6 +46,14 @@ Each match says which `field` it is, and that determines what to do with it:
 
 Coverage — which countries, sources, quarters, area levels and age groups exist, and how they are labelled — **differs per country and per indicator**, so it is not listed here. Resolve it rather than assuming it.
 
+## Reporting
+
+- **Always answer a question that matches a `concept` with a short, high-level bullet-point summary of the headline figures plus 1-3 simple, static inline charts.** A single-panel artifact is the right tool for this and is preferred, rendered directly, not generated as an image file to hand over as a download. Do not write extended prose. Do not build a multi-panel dashboard or add interactivity (filters, tooltips, toggles) unless the user explicitly asks for one.
+- State plainly when a number comes from this server versus anywhere else. If a matched concept has `answerable: false` or nothing matches at all, say this dataset does not cover it, and ask the user whether they want a pointer to an external source or to supply their own data - never fetch or guess the answer.
+- Report the `lower`–`upper` interval alongside `mean` where there is one. Spectrum and SHIPP give point estimates only; say so rather than implying precision.
+- When ranking areas, check whether the top entries' intervals overlap. If they do, say the ordering between them is not statistically meaningful.
+- "Burden", "risk", "gap" and "priority" are ambiguous. Resolve them with `search_hiv_metadata` first. If a concept maps to several indicators that rank differently (as `treatment_gap` does), report both or ask which the user means.
+
 ## Never sum across these dimensions
 
 Age groups, sexes and area levels each contain **totals as well as parts**, and sources are alternatives.
@@ -73,7 +81,7 @@ For a single age band, request the aggregate age group directly (e.g.
 
 **Not every indicator covers every quarter.** Check `coverage` from `search_hiv_metadata` before assuming the newest quarter exists for the indicator and source you want — asking for one it doesn't cover returns no rows.
 
-For longitudinal trends, use `Spectrum` and say which years are projections. Without it, say the data does not cover that period. Never fit a trend to a handful of `Naomi` quarters and describe it as a decade.
+For longitudinal trends, use `Spectrum`. Without it, say the data does not cover that period. Never fit a trend to a handful of `Naomi` quarters and describe it as a decade.
 
 ## Reading a response
 
@@ -82,11 +90,3 @@ read them before interpreting:
 
 - **`unit`** — `proportion` is a fraction **0–1** (`0.108` means **10.8%**, not 0.108%); `count` is a number of people; `rate_per_person_year` (`0.0018` means **1.8 per 1,000 people per year**).
 - **`basis`** — `residents` counts people who *live* in the area, `attending` counts people who *receive care* there. These differ substantially at district level. Population questions want `residents`; facility workload questions want `attending`.
-
-## Reporting
-
-- Default to a short, high-level summary of the 2025 data and a simple plot/s where the client supports one, not prose paragraphs. Give the fuller explanation and/or more complicated plots only when asked.
-- State plainly when a number comes from this server versus anywhere else. If a matched concept has `answerable: false` or nothing matches at all, say this dataset does not cover it, and ask the user whether they want a pointer to an external source or to supply their own data - never fetch or guess the answer.
-- Report the `lower`–`upper` interval alongside `mean` where there is one. Spectrum and SHIPP give point estimates only; say so rather than implying precision.
-- When ranking areas, check whether the top entries' intervals overlap. If they do, say the ordering between them is not statistically meaningful.
-- "Burden", "risk", "gap" and "priority" are ambiguous. Resolve them with `search_hiv_metadata` first. If a concept maps to several indicators that rank differently (as `treatment_gap` does), report both or ask which the user means.
