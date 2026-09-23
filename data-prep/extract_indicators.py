@@ -94,6 +94,13 @@ SOURCE = "naomi"
 R_EXTRACTOR = Path(__file__).parent / "extract_spectrum_shipp.R"
 R_SOURCES = ("spectrum", "shipp")
 
+# The last year with real programme data behind it; every model in this
+# pipeline projects beyond it, and those projected years are dropped
+# wherever a source could carry them. Bumped once per release, in the one
+# file both this script and extract_spectrum_shipp.R read it from, so the two
+# codebases can't drift out of sync on the cutoff.
+LATEST_DATA_YEAR = int((Path(__file__).parent / "LATEST_DATA_YEAR").read_text().strip())
+
 FACT_COLUMNS = [
     "area_level",
     "area_id",
@@ -170,6 +177,13 @@ def read_meta(archive: zipfile.ZipFile, member: str, integers: list[str]) -> pl.
     return frame.with_columns([pl.col(column).cast(pl.Int64, strict=False) for column in present])
 
 
+def drop_future(frame: pl.DataFrame) -> pl.DataFrame:
+    """Rows dated after LATEST_DATA_YEAR - Naomi projects beyond it, and those
+    years are not useful data (see LATEST_DATA_YEAR above)."""
+    year = frame["calendar_quarter"].str.slice(2, 4).cast(pl.Int64)
+    return frame.filter(year <= LATEST_DATA_YEAR)
+
+
 def build_facts(indicators: pl.DataFrame, dims: dict[str, pl.DataFrame]) -> pl.DataFrame:
     """Join the label and sort-order columns onto the indicator rows."""
     facts = indicators
@@ -177,7 +191,7 @@ def build_facts(indicators: pl.DataFrame, dims: dict[str, pl.DataFrame]) -> pl.D
         key = spec["key"]
         lookup = dims[name].select([key, *spec["join"]])
         facts = facts.join(lookup, on=key, how="left")
-    return facts.join(ALL_RISK_GROUPS, how="cross")
+    return drop_future(facts.join(ALL_RISK_GROUPS, how="cross"))
 
 
 def national_row(indicators: pl.DataFrame, zip_path: Path) -> tuple[str, str]:
@@ -326,6 +340,7 @@ def process(country: str, inputs: dict[str, Path], label: str | None, out_dir: P
         indicators = pl.read_csv(BytesIO(raw), columns=FACT_COLUMNS).select(FACT_COLUMNS)
 
         dims = {name: read_meta(archive, spec["member"], spec["integers"]) for name, spec in DIMENSIONS.items()}
+        dims["dim_period"] = drop_future(dims["dim_period"])
         facts = build_facts(indicators, dims)
         found, country_label = national_row(facts, zip_path)
         if found != country:

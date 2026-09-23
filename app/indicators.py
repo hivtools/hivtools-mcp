@@ -1,17 +1,33 @@
 """The ``/data`` endpoint: filtered reads of the indicators dataset.
 
-Response shape: dimensions that are identical across every matching row are
-hoisted into a ``meta`` block and dropped from the rows, because the common query
-here pins all but one dimension and varies one ("this indicator, this quarter,
-every district"). Repeating the pinned values on every row is most of the payload
-and none of the information. ``meta`` is also where a value becomes
-interpretable - the unit that says 0.108 is 10.8% rather than 0.108%, and the
-provenance that says how the figures must be described.
+Response shape: rows carry what varies and nothing else. Three things are lifted
+out of them, because the common query here pins all but one dimension and varies
+one ("this indicator, this quarter, every district"), and what is repeated on
+every row is most of the payload and none of the information:
+
+- **Constant dimensions** go to ``meta`` as ``{id, label}``. ``meta`` is also
+  where a value becomes interpretable - the unit that says 0.108 is 10.8% rather
+  than 0.108%, and the provenance that says how the figures must be described.
+- **Labels for varying dimensions** go to ``meta.labels`` as ``{dimension: {code:
+  label}}``, stated once per distinct code instead of once per row. The distinct
+  set is never larger than the rows and is usually far smaller.
+- **Measures with no value** are dropped from the row entirely. Which measures a
+  source carries is a property of the model - SHIPP is structurally a point
+  estimate, Spectrum is one today but gains intervals in a coming release - so
+  this is detected from the rows rather than from a hardcoded source table, which
+  would keep omitting them after they arrive. Dropping is per row, not per page,
+  because a mixed-source result has both: ``lower`` is a number on a Naomi row
+  and absent on the Spectrum row beside it. When a measure is absent from every
+  row on the page, ``meta.measures_omitted`` says so, since silence there would
+  otherwise read as "this indicator has no interval" rather than "this model
+  does not produce one".
 
 A dimension is only hoisted when it is *provably* constant across the whole
 result: either the caller pinned it to a single value, or this page is the entire
 result set and every row agrees. Hoisting a value that merely happens to be
-constant on page one would silently mislabel page two.
+constant on page one would silently mislabel page two. ``meta.labels`` and
+``meta.measures_omitted`` are page-local by contrast, and are safe to be: they
+describe the rows in hand rather than claiming anything about the rest.
 
 Design: a single flat fact table with a fixed set of categorical dimensions and
 numeric measures maps cleanly onto REST query parameters, so that is what this
@@ -28,6 +44,7 @@ parameter, never string-formatted into the SQL.
 
 import math
 from collections.abc import Sequence
+from functools import cache
 from typing import Annotated, Any
 
 import duckdb
@@ -36,12 +53,13 @@ from pydantic import BaseModel, Field
 
 from app.database import VIEW_NAME, get_cursor, get_manifest
 from app.diagnostics import diagnose
-from app.knowledge.loader import age_partitions
+from app.knowledge.loader import age_partitions, concepts, reporting_instruction
 from app.knowledge.loader import indicators as indicator_knowledge
 from app.observability import UserQuestion
 from app.query import count_rows, where_clause
 from app.ratelimit import limiter
 from app.schema import (
+    DEFAULT_MEASURES,
     DIMENSION_LABELS,
     DIMENSION_LOOKUPS,
     DIMENSIONS,
@@ -66,7 +84,15 @@ class DataResponse(BaseModel):
         "and `basis` (`residents` = people who live in the area, `attending` = people who "
         "receive care there). `source` is the model the figures come from, and its `label` "
         "says how they must be described when reported. When rows come from several sources, "
-        "`sources` gives that description for each."
+        "`sources` gives that description for each. "
+        "`labels` holds the human label for every code that *varies* across the rows, as "
+        "`{dimension: {code: label}}` - look a row's code up here rather than expecting a "
+        "label beside it, and use these labels when naming a quarter, area, indicator, age "
+        "group or risk group to the user. "
+        "`measures_omitted` lists measure columns left out because they are null on every "
+        "row of this page - Spectrum and SHIPP are point estimates, so their `lower`/`upper` "
+        "are absent. That is a fact about these rows, not about the indicator: the same "
+        "indicator from Naomi does have an interval."
     )
     total: int = Field(
         description="Total rows matching the filters, ignoring `limit`/`offset`."
@@ -82,10 +108,13 @@ class DataResponse(BaseModel):
     )
     data: list[dict[str, Any]] = Field(
         description="The current page of matching rows, carrying only the dimensions that "
-        "vary across the result - everything else is in `meta`. A varying dimension with a "
-        "label appears as both, e.g. `area_id` alongside `area_name`. Measure columns are "
-        "whichever were requested via `columns` (all six by default); Spectrum and SHIPP "
-        "estimates only have `mean`, so their other measures are null."
+        "vary across the result and the measures that have a value - everything else is in "
+        "`meta`. Rows hold codes, never labels: resolve a code through `meta.labels` (for a "
+        "dimension that varies) or read it off `meta` directly (for one that does not). "
+        "Measure columns are whichever were requested via `columns`, minus any with no value "
+        "on that row, so rows from different sources can carry different measures - a Naomi "
+        "row has `lower`/`upper` and a Spectrum row beside it does not. A missing measure "
+        "means that model does not produce it, not that the estimate is zero."
     )
 
 
@@ -144,7 +173,7 @@ def _age_groups(age_group: list[str] | None, age_partition: str | None) -> list[
 def _measures(values: list[str] | None) -> list[str]:
     requested = _split(values)
     if requested is None:
-        return list(MEASURES)
+        return list(DEFAULT_MEASURES)
     unknown = [value for value in requested if value not in MEASURES]
     if unknown:
         raise HTTPException(
@@ -220,6 +249,21 @@ def source_descriptions(manifest: dict[str, Any], country: str | None, source: s
     return found
 
 
+@cache
+def _concept_indicator_ids() -> frozenset[str]:
+    """Indicator ids referenced by an answerable concept - these carry the plotting instruction.
+
+    Out-of-scope concepts have nothing to query, so their (empty) indicator
+    lists never contribute here.
+    """
+    return frozenset(
+        entry["id"]
+        for concept in concepts().values()
+        if concept.get("answerable", True)
+        for entry in concept.get("indicators", [])
+    )
+
+
 def build_meta(
     cursor: duckdb.DuckDBPyConnection,
     constants: dict[str, Any],
@@ -263,10 +307,59 @@ def build_meta(
     return meta
 
 
-def strip_constants(row: dict[str, Any], constants: dict[str, Any]) -> dict[str, Any]:
-    """Drop hoisted dimensions, and the label columns that travel with them."""
+def label_maps(rows: Sequence[dict[str, Any]], constants: dict[str, Any]) -> dict[str, dict[Any, str]]:
+    """code -> label for each varying labelled dimension, stated once instead of per row.
+
+    A constant dimension's label is already in ``meta`` via ``build_meta``; this is
+    the other case. A varying dimension repeats its label on every row - five
+    indicator labels across 280 rows is 280 copies of five strings - and the
+    distinct set is never larger than the rows and usually far smaller.
+    """
+    maps: dict[str, dict[Any, str]] = {}
+    for dimension, label_column in DIMENSION_LABELS.items():
+        if dimension in constants:
+            continue
+        pairs = {row[dimension]: row[label_column] for row in rows if row.get(label_column) is not None}
+        if pairs:
+            maps[dimension] = pairs
+    return maps
+
+
+def absent_measures(rows: Sequence[dict[str, Any]], measures: Sequence[str]) -> list[str]:
+    """Requested measures that are null on every row here.
+
+    Detected from the rows rather than from a source -> measures table because
+    which measures a source carries changes: SHIPP is structurally a point
+    estimate, Spectrum is one today but gains intervals in a coming release. A
+    hardcoded table would keep omitting them after they arrive; this stops on its
+    own. It is a statement about these rows, not about the indicator, which is
+    why it is reported rather than applied silently.
+    """
+    if not rows:
+        return []
+    return [measure for measure in measures if all(row.get(measure) is None for row in rows)]
+
+
+def strip_row(
+    row: dict[str, Any],
+    constants: dict[str, Any],
+    labelled: Sequence[str],
+    measures: frozenset[str],
+) -> dict[str, Any]:
+    """Drop what the row does not need to carry: hoisted dimensions, labels stated
+    once in ``meta``, and measures with no value.
+
+    Null measures go per row, not just per page, because a mixed-source result
+    has both: ``lower`` is a number on a Naomi row and absent on the Spectrum row
+    beside it, so a page-wide rule alone would keep every one of those nulls.
+    """
     hoisted = set(constants) | {DIMENSION_LABELS[name] for name in constants if name in DIMENSION_LABELS}
-    return {name: value for name, value in row.items() if name not in hoisted}
+    mapped = {DIMENSION_LABELS[name] for name in labelled}
+    return {
+        name: value
+        for name, value in row.items()
+        if name not in hoisted and name not in mapped and not (name in measures and value is None)
+    }
 
 
 @router.get(
@@ -291,8 +384,8 @@ def get_data(
         list[str] | None,
         Query(
             description="Model the estimates come from: 'naomi' (subnational, a few recent quarters, with "
-            "uncertainty intervals), 'spectrum' (national only, one value per year since 1970 - later years "
-            "are projections) or 'shipp' (adults 15-49 split by behavioural `risk_group`). An indicator from "
+            "uncertainty intervals), 'spectrum' (national only, one value per year since 1970 through the "
+            "latest year of real data) or 'shipp' (adults 15-49 split by behavioural `risk_group`). An indicator from "
             "two sources is the same quantity estimated by two models: pick one, never add them. Which "
             "sources an indicator has is in its coverage from `search_hiv_metadata`. ALWAYS tell "
             "the user what source the value is from."
@@ -327,7 +420,8 @@ def get_data(
     risk_group: Annotated[
         list[str] | None,
         Query(
-            description="Behavioural risk group, e.g. 'sexpaid12m' (female sex workers), 'msm' or 'pwid'. "
+            description="Behavioural risk group, e.g. 'sexpaid12m' (female sex workers) or 'male_key_pop' "
+            "(men who have sex with men or inject drugs). "
             "'all' is the whole population and the only value Naomi and Spectrum have; the rest come from "
             "source 'shipp'. Within one sex the groups do not overlap and add up to the whole population. "
             "Resolve names like 'sex workers' with `search_hiv_metadata`, which says which sexes have each."
@@ -362,7 +456,10 @@ def get_data(
     columns: Annotated[
         list[str] | None,
         Query(
-            description=f"Measure columns to return (repeat or comma-separate). One or more of {list(MEASURES)}; defaults to all."
+            description=f"Measure columns to return (repeat or comma-separate). One or more of {list(MEASURES)}; "
+            f"defaults to {list(DEFAULT_MEASURES)} - the estimate and its uncertainty interval, which is what a "
+            "reported figure uses. `se`, `median` and `mode` describe the shape of the posterior and are only "
+            "worth asking for when the question is about the model rather than the epidemic."
         ),
     ] = None,
     limit: Annotated[
@@ -401,9 +498,10 @@ def get_data(
 
     `source` is the model behind a row. `naomi` is subnational, for a few recent
     quarters, with uncertainty intervals. `spectrum` is national only, one value
-    per year from 1970 - use it for long-term trends, and say that future years
-    are projections. `shipp` splits adults 15-49 by behavioural `risk_group`
-    (female sex workers, MSM, PWID and others) for one year. Spectrum and SHIPP
+    per year from 1970 through the latest year of real data - use it for
+    long-term trends. `shipp` splits adults 15-49 by behavioural `risk_group`
+    (female sex workers, men who have sex with men or inject drugs, and others)
+    for one year. Spectrum and SHIPP
     give point estimates only. An indicator from two sources is two estimates of
     the same quantity: pass `source` to pick one, and never add rows from
     different sources together. Not every country has every source.
@@ -419,6 +517,15 @@ def get_data(
     or comma-separating its value is OR within that parameter, e.g.
     `?indicator=prevalence&indicator=incidence` and `?indicator=prevalence,incidence`
     are equivalent. Omitting a filter matches every value for that dimension.
+
+    Reporting: answer with a short, high-level bullet-point summary of the
+    headline figures plus 1-3 inline charts. Do not build a multi-panel
+    dashboard or render images to download unless the user explicitly asks.
+    Always give the data source and the age, sex and population disaggregation.
+    This rule is here, in the tool description, because MCP clients are not
+    required to pass a server's `instructions` to the model and this one does
+    not - see
+    `tests/test_mcp.py::test_the_reporting_rule_reaches_the_model_without_instructions`.
     """
     figs = sig_figs if sig_figs is not None else settings.response_sig_figs
     filters: dict[str, Sequence[Any] | None] = {
@@ -449,6 +556,18 @@ def get_data(
 
     constants = constant_dimensions(filters, rows, total)
     meta = build_meta(cursor, constants, rows, manifest)
+
+    labels = label_maps(rows, constants)
+    if labels:
+        meta["labels"] = labels
+    absent = absent_measures(rows, measures)
+    if absent:
+        meta["measures_omitted"] = absent
+
+    requested = set(filters["indicator"] or [])
+    returned = {row["indicator"] for row in rows if "indicator" in row}
+    if (requested | returned) & _concept_indicator_ids():
+        meta["reporting_instruction"] = reporting_instruction()
     if age_partition is not None:
         partition = age_partitions()[age_partition]
         meta["age_partition"] = {
@@ -463,5 +582,5 @@ def get_data(
         total=total,
         # Only paid for on the empty path, which is where the caller is stuck.
         diagnostic=diagnose(cursor, filters, index) if total == 0 else None,
-        data=[strip_constants(row, constants) for row in rows],
+        data=[strip_row(row, constants, list(labels), frozenset(measures)) for row in rows],
     )

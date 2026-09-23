@@ -6,8 +6,8 @@ Each row has a `source` saying which it came from:
 | `source` | Input | What it adds |
 | --- | --- | --- |
 | `naomi` | Naomi output zip | Subnational estimates for a few recent quarters, with uncertainty |
-| `spectrum` | Spectrum `.pjnz` | National estimates for every year since 1970, including projections |
-| `shipp` | SHIPP workbook `.xlsx` | Adults 15-49 split by behavioural `risk_group` (female sex workers, MSM, PWID, ...) |
+| `spectrum` | Spectrum `.pjnz` | National estimates for every year since 1970, through the latest year of real data |
+| `shipp` | SHIPP workbook `.xlsx` | Adults 15-49 split by behavioural `risk_group` (female sex workers, men who have sex with men or inject drugs, ...) |
 
 ## Building the dataset
 
@@ -89,12 +89,33 @@ way:
 - **Spectrum**'s single-year ages are summed into every Naomi age group, and
   `both` is added for sex. Its values are dated to Q4 of each year (Q2 for files
   from before Spectrum 6.2), as Naomi itself does.
+- **Spectrum's rates are derived from its counts**, because Spectrum outputs
+  only counts nationally: `prevalence` (plhiv/population), `art_coverage`
+  (art_current/plhiv), `incidence` (infections per HIV-negative person-year) and
+  `aids_mortality_rate` (aids_deaths/population). The first three reuse Naomi's
+  indicator ids and so must mean exactly what Naomi's mean - which is why
+  incidence is per HIV-negative person-year rather than per head of population,
+  a different quantity that would break "one id, one quantity". Deriving them
+  here rather than leaving it to the caller fixes the denominator once, in code
+  a reviewer can check; `tests/test_knowledge.py` asserts each stored rate
+  equals its ratio exactly, and that the three shared ids agree with Naomi's own
+  estimates. Rows whose denominator is zero are dropped rather than zero-filled:
+  before the epidemic there are no PLHIV, so ART coverage is undefined, not 0%.
 - **SHIPP** is read from its five-year age bands only. Wider age groups, `both`,
   and every area level above the districts are summed from them, and rates are
   recomputed from the sums. Its quarter is the Naomi round the workbook was built
   from, read from its "Model inputs" sheet. Within a sex its risk groups are
-  mutually exclusive and add up to the whole population; Naomi and Spectrum rows
-  have the single risk group `all`.
+  mutually exclusive and add up to the whole population, except MSM and PWID,
+  which are combined into one `male_key_pop` group (summed counts, then rates
+  recomputed from the sums - not averaged); Naomi and Spectrum rows have the
+  single risk group `all`.
+- **Naomi and Spectrum both project beyond the last year with real programme
+  data behind them.** Those projected years are dropped, not served: both
+  `extract_indicators.py` and `extract_spectrum_shipp.R` read the cutoff year
+  from [`data-prep/LATEST_DATA_YEAR`](https://github.com/hivtools/hivtools-mcp/blob/main/data-prep/LATEST_DATA_YEAR),
+  a single file so the two codebases can't disagree on it. Bump it once per
+  release as more real data becomes available; nothing downstream needs to
+  know about projected years, because they are never in the dataset.
 
 See `--help` for running the extractor directly.
 
@@ -108,7 +129,8 @@ data-prep/naomi-data/
   dim_area/country=TZA/source=naomi/...            meta_area.csv
   dim_age_group/...                                meta_age_group.csv
   dim_period/...                                   meta_period.csv, plus Spectrum's years
-  dim_indicator/...                                meta_indicator.csv, plus aids_deaths
+  dim_indicator/...                                meta_indicator.csv, plus Spectrum's own
+                                                   and its derived rates
   dim_risk_group/...                               risk group labels
 ```
 

@@ -224,7 +224,7 @@ def test_coverage_is_keyed_by_source(client: TestClient):
 
 def test_coverage_names_the_risk_groups_a_source_has(client: TestClient):
     hit = first(client, "population", field="indicator", country="TZA")["results"][0]
-    assert hit["coverage"]["shipp"]["risk_group"] == ["msm", "sexpaid12m"]
+    assert hit["coverage"]["shipp"]["risk_group"] == ["male_key_pop", "sexpaid12m"]
 
 
 def test_a_long_run_of_quarters_is_given_as_a_span():
@@ -242,9 +242,9 @@ def test_a_risk_group_says_which_source_and_sex_have_it(client: TestClient):
 
 
 def test_a_risk_group_with_no_rows_is_not_offered(client: TestClient):
-    """pwid is in the fixture's risk-group table but has no facts behind it."""
-    ids = {hit["id"] for hit in first(client, "people who inject drugs", country="TZA")["results"]}
-    assert "pwid" not in ids
+    """sexnonreg is in the fixture's risk-group table but has no facts behind it."""
+    ids = {hit["id"] for hit in first(client, "casual partners", country="TZA")["results"]}
+    assert "sexnonreg" not in ids
 
 
 def test_the_whole_population_group_is_not_a_search_result(client: TestClient):

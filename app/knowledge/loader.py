@@ -61,15 +61,26 @@ def concepts() -> dict[str, Any]:
     ``concepts_outofscope.yaml`` (question -> decline + pointer, ``answerable:
     false``) into one dict, since both share the same entry schema and both are
     served under ``field="concept"`` - the caller should not have to know which
-    file a match came from.
+    file a match came from. Excludes ``reporting_instruction`` - that is a rule
+    for the model, not a searchable entry; get it from ``reporting_instruction()``.
     """
-    analysis = _load_yaml("concepts_analysis")
+    analysis = {key: value for key, value in _load_yaml("concepts_analysis").items() if key != "reporting_instruction"}
     out_of_scope = _load_yaml("concepts_outofscope")
     overlap = set(analysis) & set(out_of_scope)
     if overlap:
         message = f"concept id(s) in both concepts_analysis.yaml and concepts_outofscope.yaml: {sorted(overlap)}"
         raise ValueError(message)
     return {**analysis, **out_of_scope}
+
+
+def reporting_instruction() -> str:
+    """The plotting/summary-format rule that must accompany every answerable concept match.
+
+    Lives as data in concepts_analysis.yaml, not just a comment, because a
+    comment never reaches the model - this has to be read out of the file and
+    actually surfaced (in instructions.md and on every field="concept" match).
+    """
+    return _load_yaml("concepts_analysis")["reporting_instruction"]
 
 
 def _methodology_yaml() -> dict[str, Any]:

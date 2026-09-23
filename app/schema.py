@@ -33,6 +33,12 @@ SOURCES: tuple[str, ...] = ("naomi", "spectrum", "shipp")
 Measure = Literal["mean", "se", "median", "mode", "lower", "upper"]
 MEASURES: tuple[Measure, ...] = get_args(Measure)
 
+# What comes back when the caller does not say. `mean` plus its interval is what
+# an answer reports; `se`, `median` and `mode` are the posterior's shape, which
+# no reported figure uses and which cost a third of a Naomi payload. Still
+# requestable by name - this is the default, not the allowlist.
+DEFAULT_MEASURES: tuple[Measure, ...] = ("mean", "lower", "upper")
+
 # Human labels denormalised onto the fact table at data-prep time. `country`,
 # `source` and `sex` are absent deliberately: their codes ('MWI', 'naomi',
 # 'both') are already readable, so a label column would be repetition.

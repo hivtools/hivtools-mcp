@@ -7,18 +7,29 @@ from fastapi.testclient import TestClient
 from app import settings as settings_module
 from app.main import app
 from app.ratelimit import limiter
-from app.schema import DIMENSIONS, LABEL_COLUMNS, MEASURES
+from app.schema import DEFAULT_MEASURES, DIMENSIONS, LABEL_COLUMNS, MEASURES
 
-# What a row carries when nothing is hoisted: every dimension, every label that
-# goes with one, and the requested measures.
-ALL_COLUMNS = set(DIMENSIONS) | set(LABEL_COLUMNS) | set(MEASURES)
+# What a row carries when nothing is hoisted: every dimension and the measures
+# that come back by default. Labels are never on the row - a constant dimension's
+# goes to `meta`, a varying one's to `meta.labels`.
+ALL_COLUMNS = set(DIMENSIONS) | set(DEFAULT_MEASURES)
 
 
-def test_no_filters_returns_every_row_with_every_column(client: TestClient):
+def test_no_filters_returns_every_row_with_the_default_columns(client: TestClient):
     body = client.get("/data").json()
     assert body["total"] == 8
     assert len(body["data"]) == 8
     assert set(body["data"][0]) == ALL_COLUMNS
+    assert not set(body["data"][0]) & set(LABEL_COLUMNS)
+
+
+def test_posterior_shape_measures_are_not_returned_by_default(client: TestClient):
+    """se/median/mode are a third of a Naomi payload and no reported figure uses them."""
+    default = client.get("/data", params={"country": "MWI"}).json()
+    assert not set(default["data"][0]) & {"se", "median", "mode"}
+    # ...but they are still there for the asking.
+    asked = client.get("/data", params={"country": "MWI", "columns": "mean,se"}).json()
+    assert asked["data"][0]["se"] == 0.01
 
 
 def test_filter_by_single_dimension(client: TestClient):
@@ -40,12 +51,12 @@ def test_separate_filters_are_anded(client: TestClient):
 
 def test_columns_restricts_returned_measures(client: TestClient):
     body = client.get("/data", params=[("columns", "mean"), ("columns", "lower")]).json()
-    assert set(body["data"][0]) == set(DIMENSIONS) | set(LABEL_COLUMNS) | {"mean", "lower"}
+    assert set(body["data"][0]) == set(DIMENSIONS) | {"mean", "lower"}
 
 
 def test_columns_accepts_comma_separated(client: TestClient):
     body = client.get("/data", params={"columns": "mean,lower"}).json()
-    assert set(body["data"][0]) == set(DIMENSIONS) | set(LABEL_COLUMNS) | {"mean", "lower"}
+    assert set(body["data"][0]) == set(DIMENSIONS) | {"mean", "lower"}
 
 
 def test_filter_accepts_comma_separated(client: TestClient):
@@ -159,11 +170,24 @@ def test_pinned_dimensions_are_hoisted_into_meta(client: TestClient):
     assert "age_group_label" not in body["data"][0]
 
 
-def test_varying_dimensions_stay_in_rows_with_their_labels(client: TestClient):
+def test_varying_dimensions_stay_in_rows_but_their_labels_are_stated_once(client: TestClient):
+    """A varying dimension's label belongs in `meta.labels`, not on every row.
+
+    Repeating it per row is the single largest avoidable cost in a long result:
+    five indicator labels across 280 rows is 280 copies of five strings.
+    """
     body = client.get("/data", params={"country": "MWI", "columns": "mean"}).json()
     assert "area_id" not in body["meta"]
-    assert {"area_id", "area_name"} <= set(body["data"][0])
-    assert body["data"][0]["area_name"] == "Malawi"
+    assert "area_id" in body["data"][0]
+    assert "area_name" not in body["data"][0]
+    assert body["meta"]["labels"]["area_id"] == {"MWI": "Malawi", "MWI_1_1": "Northern"}
+
+
+def test_a_hoisted_dimension_is_not_repeated_in_the_label_map(client: TestClient):
+    """Its label is already in `meta` as {id, label}; a second copy is waste."""
+    body = client.get("/data", params={"country": "MWI", "columns": "mean"}).json()
+    assert body["meta"]["indicator"]["label"] == "HIV prevalence"
+    assert "indicator" not in body["meta"].get("labels", {})
 
 
 def test_meta_carries_unit_and_basis_from_the_knowledge_layer(client: TestClient):
@@ -263,10 +287,15 @@ def test_one_indicator_from_two_sources_comes_back_as_two_rows(client: TestClien
     """Same ID, same quantity, two models: the rows differ only in source."""
     params = {"country": "TZA", "indicator": "plhiv", "calendar_quarter": "CY2025Q4", "columns": "mean,lower"}
     body = client.get("/data", params=params).json()
-    assert [(row["source"], row["mean"], row["lower"]) for row in body["data"]] == [
-        ("naomi", 1010.0, 900.0),
-        ("spectrum", 1000.0, None),
+    # `lower` is a number on the Naomi row and simply absent on the Spectrum one
+    # beside it: a measure the model does not produce is dropped per row, so a
+    # mixed-source result carries no nulls at all.
+    assert body["data"] == [
+        {"source": "naomi", "mean": 1010.0, "lower": 900.0},
+        {"source": "spectrum", "mean": 1000.0},
     ]
+    # Not page-wide absent, so nothing is announced as omitted.
+    assert "measures_omitted" not in body["meta"]
     # Both are described, since both are in the result.
     assert body["meta"]["sources"]["spectrum"] == "Tanzania estimates 2026 - Spectrum national projection"
     assert "source" not in body["meta"]
@@ -298,12 +327,41 @@ def test_risk_group_filters_and_is_labelled(client: TestClient):
     assert body["meta"]["source"]["id"] == "shipp"
 
 
-def test_risk_groups_vary_in_rows_with_their_labels(client: TestClient):
+def test_risk_groups_vary_in_rows_and_are_labelled_once_in_meta(client: TestClient):
     body = client.get("/data", params={"country": "TZA", "source": "shipp", "columns": "mean"}).json()
-    assert [(row["risk_group"], row["risk_group_label"]) for row in body["data"]] == [
-        ("sexpaid12m", "Female sex workers"),
-        ("msm", "Men who have sex with men"),
-    ]
+    assert [row["risk_group"] for row in body["data"]] == ["sexpaid12m", "male_key_pop"]
+    assert body["meta"]["labels"]["risk_group"] == {
+        "sexpaid12m": "Female sex workers",
+        "male_key_pop": "Men who have sex with men or inject drugs",
+    }
+
+
+# --- measures absent from a source ------------------------------------------
+
+
+def test_measures_null_for_every_row_are_omitted_and_announced(client: TestClient):
+    """Spectrum is a point estimate, so its interval columns carry no information."""
+    body = client.get("/data", params={"country": "TZA", "source": "spectrum"}).json()
+    assert body["meta"]["measures_omitted"] == ["lower", "upper"]
+    assert set(body["data"][0]) & set(MEASURES) == {"mean"}
+    # Asking for the rest does not resurrect them either - they have no value here.
+    asked = client.get("/data", params={"country": "TZA", "source": "spectrum", "columns": ",".join(MEASURES)}).json()
+    assert asked["meta"]["measures_omitted"] == ["se", "median", "mode", "lower", "upper"]
+
+
+def test_an_explicitly_requested_measure_is_still_omitted_when_it_is_all_null(client: TestClient):
+    """Honouring the request literally would just reissue the nulls; `measures_omitted` carries it."""
+    params = {"country": "TZA", "source": "spectrum", "columns": "mean,lower"}
+    body = client.get("/data", params=params).json()
+    assert body["meta"]["measures_omitted"] == ["lower"]
+    assert "lower" not in body["data"][0]
+
+
+def test_a_source_that_has_intervals_keeps_them(client: TestClient):
+    """The omission is a fact about the rows, not about the indicator."""
+    body = client.get("/data", params={"country": "MWI", "source": "naomi"}).json()
+    assert "measures_omitted" not in body["meta"]
+    assert {"lower", "upper"} <= set(body["data"][0])
 
 
 def test_search_is_rate_limited_separately(data_dir: Path, monkeypatch: pytest.MonkeyPatch):
