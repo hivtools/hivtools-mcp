@@ -52,28 +52,22 @@ prevention_methods:
 prep_coverage:
   label: PrEP coverage (including long-acting PrEP)
   aliases:
-    - PrEP
-    - pre-exposure prophylaxis
     - PrEP coverage
     - PrEP uptake
-    - oral PrEP
-    - long-acting PrEP
-    - LA-PrEP
-    - LEN
-    - lenacapavir
-    - Yeztugo
-    - Sunlenca
-    - CAB-LA
-    - cabotegravir
+    - PrEP use
+    - how many people are on PrEP
+    - people on PrEP
+    - number on PrEP
   what_it_measures: Coverage or uptake of pre-exposure prophylaxis (PrEP), including newer long-acting injectable forms such as lenacapavir and cabotegravir.
   indicators: []
   notes: >-
     No PrEP coverage data available in this dataset - exists in the Goals
     model, not in Naomi/Spectrum/SHIPP, to be added in a future version.
-    SHIPP incidence by risk group can inform PrEP strategy (where risk is
-    highest) even without coverage data - see key_populations,
-    prevention_priority.
-  related: [key_populations, prevention_priority, prevention_methods]
+    This concept is only about how many people are *already* on PrEP. A
+    question about who PrEP *should* go to is answerable - send it to
+    prep_targeting, which ranks populations by targeting efficiency from
+    SHIPP incidence and infections.
+  related: [prep_targeting, key_populations, prevention_priority, prevention_methods]
   answerable: false
 
 tb_hiv_coinfection:

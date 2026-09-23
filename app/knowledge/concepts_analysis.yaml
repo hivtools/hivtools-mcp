@@ -34,12 +34,7 @@
 
 reporting_instruction: >-
   Always answer a question that matches this concept with a short,
-  high-level bullet-point summary of the headline figures plus 1-3 simple,
-  static inline charts - a single-panel artifact is the right tool for this
-  and is preferred, rendered directly, not generated as an image file to
-  hand over as a download. Do not write extended prose. Do not build a
-  multi-panel dashboard or add interactivity (filters, tooltips, toggles)
-  unless the user explicitly asks for one.
+  high-level bullet-point summary of the headline figures plus 1-3 inline charts. Then ask the user if they want different disaggregates or data startification (by age, sex, geography). Do not build a multipanel dashboard or render images to download unless the user explicitly asks. Alway give data source and age, sex and population disaggregation.
 
 treatment_gap:
   label: Treatment gap
@@ -59,24 +54,24 @@ treatment_gap:
     - proportion not on ART
     - proportion not on treatment
   what_it_measures: People living with HIV who are not currently receiving antiretroviral therapy.
-  plot: bar, top districts by untreated PLHIV count or by ART coverage
+  plot: bar, top districts by % ART coverage or by untreated PLHIV count
   cascade_stage: second 95 (of those diagnosed, 95% on treatment)
   indicators:
-    - id: untreated_plhiv_num
-      role: primary
-      note: Count of resident PLHIV not on ART. Use this for "where is the biggest gap".
     - id: art_coverage
+      role: primary
+      note: Proportion of PLHIV on ART. LOWER means a BIGGER gap - rank ascending.
+    - id: untreated_plhiv_num
       role: secondary
-      note: Proportion of PLHIV on ART. LOWER means a BIGGER gap - do not rank descending.
+      note: Count of resident PLHIV not on ART. Use this for "where is the biggest gap".
     - id: plhiv
       role: denominator
   default_disaggregation:
     source: naomi
-    age_group: Y015_999
+    age_group: Y015_049
     sex: both
   notes: >-
-    Count and coverage rank districts differently, and both are legitimate -
-    report both, or ask which the user wants. Use untreated_plhiv_num
+    Coverage and count rank districts differently. Report % ART coverage first
+    and ask if user wants untreated_plhiv_num. Use untreated_plhiv_num
     (residents), not untreated_plhiv_attend (catchment, can be negative).
   related: [treatment_coverage, treatment_cascade, treatment_priority]
 
@@ -95,23 +90,26 @@ hiv_burden:
     - highest number of PLHIV
     - most PLHIV
     - highest concentration of PLHIV
-  what_it_measures: How much HIV there is in a population - either as a count of people or as a rate.
-  plot: bar, top districts by PLHIV or prevalence
+    - highest prevalence
+  what_it_measures: How much HIV there is in a population - either as a rate or count of people.
+  plot: bar, top districts prevalence or PLHIV
   indicators:
-    - id: plhiv
-      role: primary
-      note: Number of people living with HIV. This is what "burden" usually means.
     - id: prevalence
-      role: secondary
+      role: primary
       note: Proportion of the population living with HIV. A rate, not a count.
+    - id: plhiv
+      role: secondary
+      note: Number of people living with HIV. This is what "burden" usually means.
+
   default_disaggregation:
     source: naomi
     age_group: Y015_049
     sex: both
   notes: >-
-    Ambiguous - resolve before answering. Count and rate can disagree: a small
-    district may have high prevalence but few PLHIV, a large one the reverse.
-    Report both or ask which the user means. "Highest burden" usually means plhiv.
+    Rate and count are not connected.
+    A district with high prevalence and small population may have few PLHIV.
+    A district with low prevalence and big population may have many PLHIV.
+    Report prevalence first and ask if user wants to burden by total PLHIV.
   related: [epidemic_size, age_sex_burden, key_populations]
 
 prevention_priority:
@@ -128,12 +126,13 @@ prevention_priority:
     - where are people getting infected
     - who is at the highest risk for HIV
     - where are people at the highest risk for HIV
-  what_it_measures: Where new HIV infections are occurring, and where the per-person risk of acquiring HIV is highest.
+    - how to roll out prevention
+  what_it_measures: Where the risk of acquiring HIV is highest, where the rate of new HIV infections is the highest.
   plot: scatter, incidence vs prevalence by district
   indicators:
     - id: incidence
       role: primary
-      note: New infections per person-year. The per-person RISK - use for "highest risk".
+      note: Incidence per 1000 person-year. Use for "highest risk of HIV infections".
     - id: infections
       role: secondary
       note: Absolute number of new infections per year. Use for "where are the most infections".
@@ -153,7 +152,62 @@ prevention_priority:
     fast-growing or early-stage epidemic there - worth flagging even if its
     absolute burden (hiv_burden) is not yet the largest. For sex workers, MSM
     or PWID, see key_populations.
-  related: [acquisition_risk, hiv_burden, key_populations]
+  related: [acquisition_risk, hiv_burden, key_populations, prep_targeting]
+
+prep_targeting:
+  label: PrEP targeting
+  aliases:
+    - PrEP
+    - pre-exposure prophylaxis
+    - oral PrEP
+    - long-acting PrEP
+    - LA-PrEP
+    - LEN
+    - lenacapavir
+    - CAB-LA
+    - cabotegravir
+    - PrEP targeting
+    - PrEP targetting
+    - PrEP prioritisation
+    - PrEP prioritization
+    - who should get PrEP
+    - who to give PrEP to
+    - which population should we roll out PrEP in
+    - which populations should we roll out PrEP in
+    - where to roll out PrEP
+    - how to roll out PrEP
+  what_it_measures: Which populations to offer PrEP to, ranked by how efficiently they capture new HIV infections.
+  plot: line, cumulative % of infections captured against % of the HIV-negative population reached
+  indicators:
+    - id: incidence
+      role: primary
+      source: shipp
+      note: Rank strata by this. Per person-year among HIV-negative people.
+    - id: infections
+      role: primary
+      source: shipp
+      note: Absolute new infections per year - what a stratum captures.
+  default_disaggregation:
+    source: shipp
+    age_group: Y015_049
+  notes: |-
+    "Who should get PrEP", not "who is on PrEP" - no coverage data here (see
+    prep_coverage). Say that once, then run:
+
+    1. QUERY   source=shipp, area_level=district, indicator=infections,incidence
+               age  15-49 via an age_partition (never sum overlapping groups)
+               sex  each separately, with its own risk groups, exclude nosex12m
+    2. DERIVE  hiv_negative = infections / incidence
+               (SHIPP incidence = infections / susceptible - NOT total population)
+    3. RANK    strata by incidence, descending
+    4. CURVE   cumulative % infections captured  vs  % hiv_negative reached
+               one line per stratification: none | sex | +age | +district | +risk_group
+    5. REPORT  % captured at 10% and at 20% reached; composition of the top 10%
+    6. ASK     name the 5 districts with the most infections among top-10% strata,
+               ask which to drill into (Naomi incidence + infections by age and sex)
+
+    Excludes no-sex-in-12-months. Incidence is per person-year: 0.0018 = 1.8 per 1,000.
+  related: [prevention_priority, key_populations, prep_coverage]
 
 treatment_priority:
   label: Treatment prioritisation
@@ -170,17 +224,17 @@ treatment_priority:
   plot: scatter, prevalence vs ART coverage by district
   cascade_stage: second 95
   indicators:
-    - id: untreated_plhiv_num
-      role: primary
-      note: Untreated PLHIV - the size of the opportunity.
     - id: art_coverage
       role: primary
       note: Current coverage - low coverage means the most headroom.
+    - id: untreated_plhiv_num
+      role: primary
+      note: Untreated PLHIV - the size of the opportunity.
     - id: prevalence
       role: secondary
   default_disaggregation:
     source: naomi
-    age_group: Y015_999
+    age_group: Y015_049
     sex: both
   notes: >-
     Usually means high prevalence AND low ART coverage together - report the
@@ -213,7 +267,7 @@ treatment_coverage:
       note: Number receiving ART at facilities in the area (catchment/service load).
   default_disaggregation:
     source: naomi
-    age_group: Y015_999
+    age_group: Y015_049
     sex: both
   notes: >-
     art_current_residents and art_current differ at district level - patients
@@ -311,12 +365,15 @@ acquisition_risk:
     - who is most at risk
     - most at risk
     - vulnerable populations
-  what_it_measures: Which age and sex groups face the highest per-person risk of acquiring HIV.
-  plot: grouped bar, incidence by age group split by sex
+  what_it_measures: Which age, sex and behavioural groups face the highest risk of acquiring HIV.
+  plot: grouped bar, incidence by age group split by sex or population group
   indicators:
     - id: incidence
       role: primary
       note: Rate per person-year. Disaggregate by age_group and sex.
+    - id: incidence
+      role: primary
+      note: Rate per person-year. Disaggregate by population group.
     - id: infections
       role: secondary
   default_disaggregation:
@@ -450,22 +507,38 @@ epidemic_trend:
   what_it_measures: How the epidemic has changed over time, nationally.
   plot: line, key indicators (rates) over time
   indicators:
+    - id: prevalence
+      role: primary
+      source: spectrum
+      note: Share of the population living with HIV.
+    - id: incidence
+      role: primary
+      source: spectrum
+      note: New infections per HIV-negative person per year.
+    - id: art_coverage
+      role: primary
+      source: spectrum
+      note: Share of people living with HIV who are on ART.
+    - id: aids_mortality_rate
+      role: primary
+      source: spectrum
+      note: AIDS deaths per person per year.
     - id: plhiv
-      role: primary
+      role: secondary
       source: spectrum
-      note: People living with HIV at each year's end.
+      note: Count form - use when the user asks how many people, not how the epidemic changed.
     - id: infections
-      role: primary
+      role: secondary
       source: spectrum
-      note: New infections during each year.
+      note: Count form of incidence.
     - id: aids_deaths
-      role: primary
+      role: secondary
       source: spectrum
-      note: AIDS deaths during each year.
+      note: Count form of the AIDS-mortality rate.
     - id: art_current
       role: secondary
       source: spectrum
-      note: Number on ART.
+      note: Count form of ART coverage.
     - id: population
       role: denominator
       source: spectrum
@@ -476,23 +549,14 @@ epidemic_trend:
     sex: both
   notes: >-
     Long-term change is Spectrum only (source=spectrum), never Naomi - Naomi's
-    few recent quarters cannot support a 5-, 10- or 20-year trend. Default to
-    rates, not counts, when the user hasn't said which: prevalence
-    (plhiv/population), ART coverage (art_current/plhiv), incidence
-    (infections/population) and the AIDS-mortality rate (aids_deaths/
-    population) - a rate says whether the epidemic is getting better or worse
-    per person, which a rising count alone does not (plhiv can rise for years
-    purely because ART keeps more people alive, even as risk falls). Show
-    counts instead only when the user specifically wants absolute numbers
-    (e.g. "how many people" rather than "how has it changed"). None of the
-    four rates are native to Spectrum - actually fetch plhiv, population,
-    art_current, infections and aids_deaths and compute each rate per period;
-    do not just describe that deriving it is possible without doing the
-    arithmetic. Do this silently: state the rate as a fact, don't narrate
-    the fetch-and-divide steps or caveat every figure with how it was
-    calculated - that belongs in a footnote at most, and only in full if the
-    user asks how a number was worked out or questions a figure. Also disaggregated by age and sex - see
-    age_sex_burden for burden-by-age-over-time.
+    few recent quarters cannot support a 5-, 10- or 20-year trend. Fetch the
+    four rate indicators, not the counts, unless the user asked for absolute
+    numbers ("how many people" rather than "how has it changed"): a rate says
+    whether the epidemic is getting better or worse per person, which a rising
+    count alone does not - plhiv can rise for years purely because ART keeps
+    more people alive, even as risk falls. The rates are stored, so query them
+    directly; do not compute them from the counts. Also disaggregated by age
+    and sex - see age_sex_burden for burden-by-age-over-time.
   related: [epidemic_size, aids_mortality, hiv_burden, age_sex_burden]
 
 aids_mortality:
@@ -629,9 +693,7 @@ key_populations:
     age_group: Y015_049
     sex: [female, male]
   notes: >-
-    Only for countries with SHIPP estimates (source=shipp) - Naomi and Spectrum
-    have no risk-group breakdown. SHIPP is adults 15-49, one quarter, often
-    older than Naomi's - totals won't match and must not be combined. Groups
+    Source is SHIPP estimates (source=shipp). Groups
     differ by sex: sexpaid12m (sex workers) is women only; male_key_pop (men
     who have sex with men and men who inject drugs, combined into one group)
     is men only; the rest exist for both. Within one sex, groups are mutually

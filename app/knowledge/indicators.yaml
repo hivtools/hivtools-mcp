@@ -21,6 +21,7 @@ prevalence:      {unit: proportion, basis: residents, aliases: [prevalence, HIV 
 incidence:       {unit: rate_per_person_year, basis: residents, aliases: [incidence, incidence rate, risk of infection, new infection rate]}
 infections:      {unit: count, basis: residents, aliases: [new infections, infections, annual infections]}
 aids_deaths:     {unit: count, basis: residents, aliases: [AIDS deaths, AIDS-related deaths, HIV deaths, HIV-related deaths, deaths, mortality]}
+aids_mortality_rate: {unit: rate_per_person_year, basis: residents, aliases: [AIDS mortality rate, AIDS death rate, HIV mortality rate, death rate from AIDS]}
 non_aids_deaths: {unit: count, basis: residents, aliases: [non-AIDS deaths, deaths not from AIDS, other-cause mortality, general mortality, all-cause mortality]}
 
 art_coverage:          {unit: proportion, basis: residents, aliases: [ART coverage, treatment coverage, on treatment, proportion on ART]}

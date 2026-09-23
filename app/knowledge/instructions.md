@@ -48,7 +48,7 @@ Coverage — which countries, sources, quarters, area levels and age groups exis
 
 ## Reporting
 
-- **Always answer a question that matches a `concept` with a short, high-level bullet-point summary of the headline figures plus 1-3 simple, static inline charts.** A single-panel artifact is the right tool for this and is preferred, rendered directly, not generated as an image file to hand over as a download. Do not write extended prose. Do not build a multi-panel dashboard or add interactivity (filters, tooltips, toggles) unless the user explicitly asks for one.
+- **Always answer a question that matches a `concept` with a short, high-level bullet-point summary of the headline figures plus 1-3 inline charts.** Do not build a multi-panel dashboard or render images to download unless the user explicitly asks. Always give the data source and the age, sex and population disaggregation.
 - State plainly when a number comes from this server versus anywhere else. If a matched concept has `answerable: false` or nothing matches at all, say this dataset does not cover it, and ask the user whether they want a pointer to an external source or to supply their own data - never fetch or guess the answer.
 - Report the `lower`–`upper` interval alongside `mean` where there is one. Spectrum and SHIPP give point estimates only; say so rather than implying precision.
 - When ranking areas, check whether the top entries' intervals overlap. If they do, say the ordering between them is not statistically meaningful.

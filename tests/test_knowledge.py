@@ -32,7 +32,17 @@ BUILT = Path(os.environ.get("HIVTOOLS_MCP_NAOMI_DATA_DIR", ROOT / "data-prep" / 
 # Indicators Naomi does not produce, so the demo zip cannot vouch for them. Each
 # is added by data-prep/extract_spectrum_shipp.R; the built-dataset tests check
 # this list against what that actually writes.
-NON_NAOMI_INDICATORS = {"aids_deaths", "non_aids_deaths", "pmtct_receiving", "pmtct_need", "vls_suppression_prop"}
+NON_NAOMI_INDICATORS = {
+    "aids_deaths",
+    "non_aids_deaths",
+    "pmtct_receiving",
+    "pmtct_need",
+    "vls_suppression_prop",
+    # Derived from Spectrum's counts (see SPECTRUM_DERIVED_INDICATORS in the R
+    # extractor). prevalence, art_coverage and incidence are derived there too,
+    # but Naomi produces those natively, so only this one is new.
+    "aids_mortality_rate",
+}
 
 # Reference slice used for every additivity check: one indicator, one quarter,
 # national, both sexes. Additivity is a property of the dimensions, so any
@@ -289,6 +299,77 @@ def test_built_indicators_are_documented_exactly(built: duckdb.DuckDBPyConnectio
 
 def test_built_sources_are_the_known_ones(built: duckdb.DuckDBPyConnection):
     assert values(built, "SELECT DISTINCT source FROM facts") == set(SOURCES)
+
+
+# Spectrum's derived rates: numerator, denominator expression. These are stored
+# so the model queries a rate instead of fetching two counts and dividing, which
+# means the arithmetic has to be checked here instead of being visible per call.
+SPECTRUM_RATES = [
+    ("prevalence", "plhiv", "population"),
+    ("art_coverage", "art_current", "plhiv"),
+    # Per HIV-negative person-year, as Naomi defines incidence - not per head of
+    # population, which is a different quantity under the same id.
+    ("incidence", "infections", "population - plhiv"),
+    ("aids_mortality_rate", "aids_deaths", "population"),
+]
+
+
+@pytest.mark.parametrize(("rate", "numerator", "denominator"), SPECTRUM_RATES)
+def test_spectrum_rates_equal_their_ratio(
+    built: duckdb.DuckDBPyConnection, rate: str, numerator: str, denominator: str
+):
+    """Every stored rate is exactly the ratio it claims to be, in every cell."""
+    worst = built.sql(f"""
+        WITH wide AS (
+            SELECT country, sex, age_group, calendar_quarter,
+                   max(mean) FILTER (indicator = '{rate}') AS stored,
+                   max(mean) FILTER (indicator = '{numerator}') AS num,
+                   max(mean) FILTER (indicator = 'plhiv') AS plhiv,
+                   max(mean) FILTER (indicator = 'population') AS population,
+                   max(mean) FILTER (indicator = 'art_current') AS art_current
+            FROM facts WHERE source = 'spectrum' GROUP BY ALL
+        )
+        SELECT max(abs(stored - num / ({denominator}))) FROM wide
+        WHERE stored IS NOT NULL AND ({denominator}) > 0
+    """).fetchone()
+    assert worst is not None
+    assert worst[0] is not None, f"no {rate} rows found to check"
+    assert worst[0] < 1e-12, f"{rate} differs from {numerator}/({denominator}) by up to {worst[0]}"
+
+
+# Relative, not absolute: incidence is ~0.0008, so an absolute bound loose
+# enough to pass would not catch anything. Tolerances are set just above the
+# genuine disagreement between two independently fitted models (measured:
+# prevalence 0.09%, incidence 0.28%, art_coverage 2.5%), which leaves them tight
+# enough to fail on a wrong denominator - deriving incidence per head of
+# population rather than per HIV-negative person-year is a ~3.4% relative error
+# at adult prevalence, well above incidence's 1% bound here.
+#
+# art_coverage needs the looser bound because Naomi and Spectrum fit paediatric
+# ART differently; the gap is confined to the under-15 age groups, and adults
+# agree to well under 1%.
+CROSS_MODEL_TOLERANCE = {"prevalence": 0.01, "incidence": 0.01, "art_coverage": 0.03}
+
+
+@pytest.mark.parametrize(("rate", "tolerance"), sorted(CROSS_MODEL_TOLERANCE.items()))
+def test_spectrum_rates_agree_with_naomi(built: duckdb.DuckDBPyConnection, rate: str, tolerance: float):
+    """One id is one quantity, whichever model estimated it."""
+    worst = built.sql(
+        """
+        SELECT max(abs(n.mean - s.mean) / n.mean)
+        FROM facts n JOIN facts s
+          ON n.country = s.country AND n.area_id = s.area_id AND n.sex = s.sex
+         AND n.age_group = s.age_group AND n.calendar_quarter = s.calendar_quarter
+         AND n.indicator = s.indicator
+        WHERE n.source = 'naomi' AND s.source = 'spectrum' AND n.indicator = ?
+          AND n.area_level = 0 AND n.mean > 0
+        """,
+        params=[rate],
+    ).fetchone()
+    assert worst is not None
+    if worst[0] is None:
+        pytest.skip(f"no overlapping national {rate} rows between Naomi and Spectrum")
+    assert worst[0] < tolerance, f"{rate} differs between Naomi and Spectrum by up to {worst[0]:.1%}"
 
 
 def test_concept_indicators_exist_in_the_source_they_name(built: duckdb.DuckDBPyConnection):

@@ -89,6 +89,18 @@ way:
 - **Spectrum**'s single-year ages are summed into every Naomi age group, and
   `both` is added for sex. Its values are dated to Q4 of each year (Q2 for files
   from before Spectrum 6.2), as Naomi itself does.
+- **Spectrum's rates are derived from its counts**, because Spectrum outputs
+  only counts nationally: `prevalence` (plhiv/population), `art_coverage`
+  (art_current/plhiv), `incidence` (infections per HIV-negative person-year) and
+  `aids_mortality_rate` (aids_deaths/population). The first three reuse Naomi's
+  indicator ids and so must mean exactly what Naomi's mean - which is why
+  incidence is per HIV-negative person-year rather than per head of population,
+  a different quantity that would break "one id, one quantity". Deriving them
+  here rather than leaving it to the caller fixes the denominator once, in code
+  a reviewer can check; `tests/test_knowledge.py` asserts each stored rate
+  equals its ratio exactly, and that the three shared ids agree with Naomi's own
+  estimates. Rows whose denominator is zero are dropped rather than zero-filled:
+  before the epidemic there are no PLHIV, so ART coverage is undefined, not 0%.
 - **SHIPP** is read from its five-year age bands only. Wider age groups, `both`,
   and every area level above the districts are summed from them, and rates are
   recomputed from the sums. Its quarter is the Naomi round the workbook was built
@@ -117,7 +129,8 @@ data-prep/naomi-data/
   dim_area/country=TZA/source=naomi/...            meta_area.csv
   dim_age_group/...                                meta_age_group.csv
   dim_period/...                                   meta_period.csv, plus Spectrum's years
-  dim_indicator/...                                meta_indicator.csv, plus aids_deaths
+  dim_indicator/...                                meta_indicator.csv, plus Spectrum's own
+                                                   and its derived rates
   dim_risk_group/...                               risk group labels
 ```
 

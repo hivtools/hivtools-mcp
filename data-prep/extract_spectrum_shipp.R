@@ -182,10 +182,59 @@ SPECTRUM_NEW_INDICATORS <- tibble::tribble(
   ~indicator, ~indicator_label, ~description,
   "aids_deaths", "AIDS deaths", "Number of AIDS-related deaths during the year",
   "non_aids_deaths", "Non-AIDS deaths", "Number of deaths from causes other than AIDS during the year",
+  "aids_mortality_rate", "AIDS mortality rate", "AIDS-related deaths during the year per person in the population",
   "pmtct_receiving", "Receiving PMTCT", "Number of pregnant women receiving antiretroviral prophylaxis or treatment for PMTCT",
   "pmtct_need", "In need of PMTCT", "Number of pregnant women in need of antiretroviral prophylaxis or treatment for PMTCT",
   "vls_suppression_prop", "Viral suppression", "Proportion of those with a viral load test result who are virally suppressed"
 )
+
+# Rates Spectrum does not output, derived from the counts it does.
+#
+# Spectrum carries only counts nationally, so without these a caller asking "how
+# has the epidemic changed" has to fetch five count series and divide them
+# itself, year by year - arithmetic an LLM client does slowly and visibly, and
+# gets to choose the denominator for. Deriving them here fixes the denominator
+# once, in code a reviewer can check.
+#
+# `prevalence`, `art_coverage` and `incidence` deliberately reuse Naomi's
+# indicator ids: the server's contract is that one id is one quantity, estimated
+# by different models, so these must mean exactly what Naomi's mean. That is why
+# incidence is per HIV-negative person-year, not per head of population - the
+# crude rate is a different quantity and would silently break that contract.
+# `aids_mortality_rate` has no Naomi equivalent, so it is declared in
+# SPECTRUM_NEW_INDICATORS above.
+SPECTRUM_DERIVED_INDICATORS <- tibble::tribble(
+  ~indicator, ~numerator, ~denominator,
+  "prevalence", "plhiv", "population",
+  "art_coverage", "art_current", "plhiv",
+  "incidence", "infections", "hiv_negative",
+  "aids_mortality_rate", "aids_deaths", "population"
+)
+
+# Rows where the denominator is zero or missing are dropped, not zero-filled:
+# before the epidemic there are no PLHIV, so ART coverage is undefined rather
+# than 0%, and a zero there would plot as a real value.
+spectrum_rates <- function(counts) {
+  wide <- counts |>
+    tidyr::pivot_wider(names_from = indicator, values_from = mean) |>
+    dplyr::mutate(hiv_negative = population - plhiv)
+
+  dplyr::bind_rows(lapply(seq_len(nrow(SPECTRUM_DERIVED_INDICATORS)), function(row) {
+    spec <- SPECTRUM_DERIVED_INDICATORS[row, ]
+    numerator <- wide[[spec$numerator]]
+    denominator <- wide[[spec$denominator]]
+    if (is.null(numerator) || is.null(denominator)) {
+      stop("cannot derive ", spec$indicator, ": Spectrum did not supply ", spec$numerator, " or ", spec$denominator)
+    }
+    wide |>
+      dplyr::transmute(
+        indicator = spec$indicator,
+        sex, age_group, area_id, calendar_quarter, risk_group,
+        mean = numerator / denominator
+      ) |>
+      dplyr::filter(is.finite(mean))
+  }))
+}
 
 # National totals reported against pregnant women (sex fixed at "female"), with
 # no age breakdown, so they are added to `facts` after the per-sex/age loop.
@@ -302,7 +351,11 @@ read_spectrum <- function(pjnz, meta) {
     dplyr::summarise(value = sum(value), .groups = "drop") |>
     dplyr::mutate(sex = "both")
 
-  facts <- dplyr::bind_rows(by_sex, both) |>
+  # The counts, aggregated to Naomi's age groups. Kept separate from `facts`
+  # because the derived rates are ratios within one sex/age/year cell, and the
+  # PMTCT and viral-suppression rows below are on a different grain (national,
+  # female, no age breakdown) and so cannot take part in them.
+  counts <- dplyr::bind_rows(by_sex, both) |>
     dplyr::inner_join(ages, by = "age", relationship = "many-to-many") |>
     dplyr::group_by(indicator, sex, age_group, year) |>
     dplyr::summarise(mean = sum(value), .groups = "drop") |>
@@ -311,8 +364,11 @@ read_spectrum <- function(pjnz, meta) {
       calendar_quarter = sprintf("CY%dQ%d", year, quarter),
       risk_group = "all"
     ) |>
-    dplyr::select(-year) |>
+    dplyr::select(-year)
+
+  facts <- counts |>
     dplyr::bind_rows(
+      spectrum_rates(counts),
       read_spectrum_pmtct(dp, first_year, final_year, national, quarter),
       read_spectrum_viral_suppression(dp, first_year, final_year, national, quarter)
     ) |>
@@ -320,7 +376,10 @@ read_spectrum <- function(pjnz, meta) {
 
   periods <- period_rows(first_year:final_year, quarter) |> drop_future()
   indicators <- indicator_rows(
-    c(names(SPECTRUM_INDICATORS), names(SPECTRUM_PMTCT_INDICATORS), "vls_suppression_prop"),
+    c(
+      names(SPECTRUM_INDICATORS), names(SPECTRUM_PMTCT_INDICATORS), "vls_suppression_prop",
+      SPECTRUM_DERIVED_INDICATORS$indicator
+    ),
     meta, SPECTRUM_NEW_INDICATORS
   )
   list(

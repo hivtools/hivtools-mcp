@@ -244,3 +244,36 @@ def test_initialize_returns_the_semantic_document(client: TestClient):
     instructions = _sse_json(response)["result"]["instructions"]
     assert "synthetic demonstration data" in instructions
     assert "Never sum across these dimensions" in instructions
+
+
+def test_the_reporting_rule_reaches_the_model_without_instructions(client: TestClient, mcp_session: str):
+    """The plotting rule must live in a channel the client actually delivers.
+
+    Measured 2026-09-22 (see LOG.md): the server advertises `instructions` in the
+    initialize result and mcp-remote forwards it intact, but the Claude client
+    discards it - a canary string placed in instructions.md never reached the
+    model. That is what made the 0.3.6 regression invisible: the rule was
+    written, but into the one channel that is dropped.
+
+    So the rule belongs in the tool description, which arrives via tools/list.
+    Keep this test if instructions.md is ever reorganised - it is the only thing
+    stopping the rule sliding back into the dead channel.
+    """
+    tools = {tool["name"]: tool for tool in _rpc(client, mcp_session, "tools/list")["tools"]}
+    # Collapsed, so the assertions do not depend on how the docstring wraps.
+    description = " ".join(tools["get_hiv_data"]["description"].split())
+    assert "1-3 inline charts" in description
+    assert "Do not build a multi-panel dashboard" in description
+    assert "render images to download" in description
+
+
+def test_instructions_are_advertised_even_though_clients_may_drop_them(client: TestClient, mcp_session: str):
+    """Still served: the spec makes using it optional, and other clients do honour it.
+
+    This guards the serving side only. It deliberately says nothing about whether
+    any given client delivers it - see the test above for why that cannot be
+    assumed.
+    """
+    result = _rpc(client, mcp_session, "tools/list")
+    assert result is not None  # session established, so initialize succeeded
+    assert instructions().startswith("# HIV estimates")
