@@ -75,15 +75,30 @@ a value the dataset does not define (with the nearest real ones, via the same
 matcher `/search` uses) or a valid combination with no rows, naming the filter
 responsible and the values that would have worked.
 
-Dimensions identical across every matching row are hoisted into `meta` and dropped
-from the rows - the common query pins five of the six dimensions and varies one,
-so repeating them per row is most of the payload and none of the information.
-`meta` also carries each dimension's label, the `unit` needed to interpret a value
-(`proportion` is a fraction 0-1, so `0.108` means 10.8%), and the `source` of the
-estimates, whose label says how the figures must be described (or `sources`, one
-per source, when the rows come from several). A dimension is only hoisted when it
-is provably constant across the whole result, not merely constant on the page in
-hand.
+Rows carry what varies and nothing else - the common query pins five of the six
+dimensions and varies one, so what repeats per row is most of the payload and none
+of the information. Three things are lifted out of the rows:
+
+- **Dimensions identical across every matching row** go into `meta`. It also
+  carries each one's label, the `unit` needed to interpret a value (`proportion`
+  is a fraction 0-1, so `0.108` means 10.8%), and the `source` of the estimates,
+  whose label says how the figures must be described (or `sources`, one per
+  source, when the rows come from several). A dimension is only hoisted when it
+  is provably constant across the whole result, not merely constant on the page
+  in hand.
+- **Labels for dimensions that vary** go into `meta.labels`, as
+  `{dimension: {code: label}}` - stated once per distinct code rather than once
+  per row. Rows therefore hold codes only: look a code up in `meta.labels`, or
+  read it off `meta` directly when the dimension is constant.
+- **Measures with no value** are dropped from the row. Which measures exist is a
+  property of the model - SHIPP is a point estimate, Naomi has intervals - so
+  this is detected from the rows, not hardcoded, and applies per row: a Naomi row
+  carries `lower`/`upper` and a Spectrum row beside it does not. When a measure
+  is absent from every row on the page, `meta.measures_omitted` names it, so the
+  absence reads as "this model does not produce it" rather than as a gap in the
+  data.
+
+Together these cut a typical long result by roughly 50-60%.
 
 ### Filters
 
@@ -116,7 +131,7 @@ means the rows returned tile their population exactly and can be added up.
 
 | Parameter | Default | Notes |
 | --- | --- | --- |
-| `columns` | all six | Which estimate columns to return: `mean`, `se`, `median`, `mode`, `lower`, `upper`. Repeat or comma-separate. This is a projection, not a row filter - the categorical columns above are always returned. Spectrum and SHIPP only have `mean`; their other measures are null. |
+| `columns` | `mean,lower,upper` | Which estimate columns to return: `mean`, `se`, `median`, `mode`, `lower`, `upper`. Repeat or comma-separate. This is a projection, not a row filter - the categorical columns above are always returned. The default is the estimate and its interval, which is what a reported figure uses; `se`, `median` and `mode` describe the posterior's shape and are only worth asking for when the question is about the model. A requested measure that has no value on a row is dropped from it rather than returned as null (see `meta.measures_omitted` above). |
 | `limit` | `1000` | 1-5000 (`HIVTOOLS_MCP_MAX_ROWS`) |
 | `offset` | `0` | Results are ordered by the categorical columns, so `limit`/`offset` paginate deterministically. |
 | `sig_figs` | `6` (`HIVTOOLS_MCP_RESPONSE_SIG_FIGS`) | Significant figures the measure values are rounded to on the way out, 1-15. The Parquet dataset keeps full model precision; this is presentation only. |
